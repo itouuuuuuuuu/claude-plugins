@@ -34,7 +34,7 @@ Design guarantees (encoded in the hook + skill):
 
 ```text
 /plugin marketplace add itouuuuuuuuu/claude-plugins
-/plugin install tmux-codex-chat@claude-plugins
+/plugin install tmux-codex-chat@itouuuuuuuuu-plugins
 ```
 
 ### 2. Install the Codex side (hook script + `hooks.json` entry)
@@ -66,7 +66,7 @@ A healthy install shows `[OK]` for all items and an `[INFO]` line about the Code
 When the plugin publishes a new version, `/plugin update` only refreshes the Claude Code skill. The Codex-side hook script needs an explicit re-install:
 
 ```text
-/plugin update tmux-codex-chat@claude-plugins
+/plugin update tmux-codex-chat@itouuuuuuuuu-plugins
 ```
 
 then
@@ -88,7 +88,7 @@ bash "$INSTALLER" --uninstall
 ```
 
 ```text
-/plugin uninstall tmux-codex-chat@claude-plugins
+/plugin uninstall tmux-codex-chat@itouuuuuuuuu-plugins
 ```
 
 Restart Codex to pick up the cleaned `hooks.json`.

@@ -8,7 +8,7 @@ Add this marketplace once, then install whichever plugins you want:
 
 ```text
 /plugin marketplace add itouuuuuuuuu/claude-plugins
-/plugin install <plugin-name>@claude-plugins
+/plugin install <plugin-name>@itouuuuuuuuu-plugins
 ```
 
 Then restart Claude Code or run `/reload-plugins`.
