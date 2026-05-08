@@ -72,12 +72,23 @@ tmux display-message -p -t %N "#{pane_id} #{session_name} #{pane_current_command
 
 If the pane is in a different session, refuse — do not silently retarget. Then check **busy state**: any of the following means not-ready, surface the capture and ask the user (wait / cancel / interrupt) — the skill never presses Esc/Ctrl-C itself.
 
-- Bottom `›` line is non-empty (residual input)
 - `Working (XXs • esc to interrupt)` visible
 - An approval dialog is on screen (patterns in §6)
 - No `›` prompt at all (mid-stream)
 
-The `Create a plan?  shift + tab use Plan mode   esc dismiss` hint is **not** a busy signal.
+The following are **NOT** busy signals — proceed without confirmation:
+
+- The `Create a plan?  shift + tab use Plan mode   esc dismiss` hint.
+- A non-empty `›` line that contains **Codex ghost-text autocomplete** (the dimmed placeholder Codex shows in the empty input area). It appears as a verbatim recent prompt or a slash-command suggestion — e.g. `› Run /review on my current changes`, `› /review`, `› /diff`. In the observed empty-input ghost-text state, `tmux load-buffer | paste-buffer` overwrites it cleanly.
+
+  **Concrete ghost-text patterns (single-line `›` content matching any of these → not busy):**
+  - starts with `/<slash-command>` (e.g. `/review`, `/diff`, `/model`, `/statusline`),
+  - starts with `Run /<slash-command>` (Codex's most common autocomplete prefix — this is what triggered this rule),
+  - matches a previously-sent prompt verbatim (Codex re-shows the last prompt as a hint after a turn ends).
+
+  **Otherwise — non-empty `›` matching none of the above → treat as residual user input.** Surface the capture and ask the user (wait / cancel / overwrite). Real half-typed prompts are often short, single-line, and imperative (`review the diff`, `fix tests`, `summarize this`, `run the build`) — do **not** generalize "looks short, looks suggestion-style" into a send-anyway rule, because that overlaps with real user drafts.
+
+  **Ambiguous edge case** (line strongly resembles a Codex autocomplete prefix above but fails an exact match — e.g. minor whitespace/casing variant): prefer to send. Do not extend this latitude to natural-language sentences or commands; ask before overwriting those.
 
 ### 3. Generate REQ + create pending file
 
