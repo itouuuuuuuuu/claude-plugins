@@ -11,7 +11,7 @@ Initial public release. Carries forward the local v3 design that was iterated on
 - Pending-file gate at `/tmp/codex-chat-$UID/pending-<uuid>` ensures stale markers cannot overwrite an in-flight request.
 - Approval-dialog watcher with burst polling (0.5 s × 20, then 2 s).
 - Approval / timeout branches surface `REQ` and `DONE_FILE` paths so users can recover answers from late completions.
-- 6-item health-check guidance and explicit "restart Codex after hook install" prerequisite.
+- Health-check guidance (`hook_ok` shell function) and explicit "restart Codex after hook install" prerequisite.
 
 ### Codex hook (`tmux-codex-chat-stop.sh`)
 
@@ -21,28 +21,13 @@ Initial public release. Carries forward the local v3 design that was iterated on
 - Atomic write via `mktemp` + `mv`.
 - `stop_hook_active=true` is a no-op (avoids spurious done-files when other Stop hooks continue the agentic loop).
 
-### Installer (`scripts/install-codex-hook.sh`)
+### Codex-side install: manual `cp` + one `hooks.json` edit
 
-- Single file with `--install` / `--check` / `--uninstall` subcommands.
-- Idempotent: re-running re-syncs the hook script and the Stop entry without duplicating wrappers.
-- Refuses if `~/.codex/hooks.json` is a symlink (don't break dotfiles managers).
-- Refuses if the existing `hooks.json` is structurally malformed (`.hooks` not object, `.hooks.Stop` not array).
-- Stages both replacement files (merged JSON + hook script) before any production rename — disk-full / perm-denied / RO-fs failures surface during staging.
-- Rolls hooks.json back from backup if the second rename fails.
-- `--check` emits 6 prefixed lines (`[OK] / [WARN] / [FAIL] / [INFO]`) covering jq, Stop entry, hook script, integrity, `codex_hooks=true`, and a Codex restart reminder. Exit non-zero if any `[FAIL]`.
-- `--uninstall` removes the hook script only when its SHA-256 matches the shipped source (preserves user overrides).
-- `hash_file()` falls back between `shasum -a 256` (macOS) and `sha256sum` (Linux).
-- All filesystem mutations use absolute paths (`/bin/cp`, `/bin/mv`, `/bin/rm`) to avoid alias surprises.
-- Backup names include `$$-$RANDOM` to avoid timestamp collisions on back-to-back runs.
+The Codex side is installed by hand (documented in [README](README.md#install)):
 
-### Tests (`tests/install-codex-hook-fixtures.sh`)
+1. `cp` the bundled `codex-hook/tmux-codex-chat-stop.sh` into `~/.codex/hooks/`.
+2. Add a `Stop` entry pointing at it in `~/.codex/hooks.json`.
+3. Ensure `codex_hooks = true` under `[features]` in `~/.codex/config.toml`.
+4. Restart Codex (it reads `hooks.json` only at session start).
 
-12 black-box scenarios, all isolated to throwaway `mktemp` HOMEs:
-
-- Fresh install creates skeleton, copies hook, registers Stop entry.
-- Three consecutive installs are idempotent and produce three distinct backups.
-- Existing `PreToolUse` / `PostToolUse` survive both `--install` and `--uninstall`.
-- `--uninstall` removes Stop entry + hook script (when SHA matches), preserves a hand-edited script otherwise.
-- Malformed `hooks.json` (object value not object; Stop value not array) is refused.
-- Symlinked `hooks.json` is refused (target untouched, symlink itself preserved).
-- `--check` produces all 6 health-report lines, warns on integrity drift, fails on `codex_hooks` not set, and is read-only (no mtime change).
+This was deliberately kept as a documented manual procedure rather than an installer script: editing user-owned `~/.codex/hooks.json` programmatically carries non-trivial risk (symlinked dotfiles, malformed pre-existing config, racing edits) and the maintenance cost of a defensive installer outweighs the convenience for a one-time, two-step setup.
