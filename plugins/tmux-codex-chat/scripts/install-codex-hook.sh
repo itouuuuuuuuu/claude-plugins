@@ -54,6 +54,19 @@ if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ]; then
   COLOR_END=$'\033[0m'
 fi
 
+# stat(1) flag dialect differs between GNU coreutils and BSD/macOS. Detect
+# once and stash the formats so we don't have to "try one then the other"
+# (which is racy: GNU stat with `-f` doesn't error cleanly on BSD-style
+# format strings — it interprets `-f` as `--file-system` and produces
+# fs metadata, which silently breaks our mtime/mode reads).
+if stat --version 2>/dev/null | grep -q "GNU coreutils"; then
+  STAT_MTIME_FMT='-c %Y'
+  STAT_MODE_FMT='-c %a'
+else
+  STAT_MTIME_FMT='-f %m'
+  STAT_MODE_FMT='-f %Lp'
+fi
+
 # ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
@@ -79,13 +92,16 @@ hash_file() {
   fi
 }
 
-# stat_mtime <path>  → unix epoch seconds (BSD/Linux differ)
+# stat_mtime <path>  → unix epoch seconds (uses pre-detected stat flavor)
 stat_mtime() {
-  if stat -f '%m' "$1" >/dev/null 2>&1; then
-    stat -f '%m' "$1"
-  else
-    stat -c '%Y' "$1"
-  fi
+  # shellcheck disable=SC2086
+  stat $STAT_MTIME_FMT "$1"
+}
+
+# stat_mode <path>  → octal mode digits, e.g. "755"
+stat_mode() {
+  # shellcheck disable=SC2086
+  stat $STAT_MODE_FMT "$1"
 }
 
 # Common preflight shared by all subcommands.
@@ -280,7 +296,7 @@ cmd_check() {
   if [ -x "$DEST_HOOK" ]; then
     local size mode
     size=$(wc -c < "$DEST_HOOK" | tr -d ' ')
-    mode=$(stat -f '%Lp' "$DEST_HOOK" 2>/dev/null || stat -c '%a' "$DEST_HOOK" 2>/dev/null)
+    mode=$(stat_mode "$DEST_HOOK")
     ok "hook script executable ($size bytes, mode $mode)"
   else
     fail "hook script not executable at $DEST_HOOK"

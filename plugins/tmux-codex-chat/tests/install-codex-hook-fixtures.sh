@@ -19,6 +19,18 @@ SRC_HOOK="$PLUGIN_ROOT/codex-hook/tmux-codex-chat-stop.sh"
 [ -x "$INSTALLER" ] || { echo "FATAL: installer not executable at $INSTALLER" >&2; exit 2; }
 [ -f "$SRC_HOOK" ]  || { echo "FATAL: hook source missing at $SRC_HOOK" >&2; exit 2; }
 
+# Portable mtime helper. GNU stat (Linux) uses `-c %Y`, BSD/macOS uses
+# `-f %m`. Mixing the two flavors with `||` fallback is unsafe because GNU
+# stat re-interprets `-f` as `--file-system` and may exit 0 with garbage.
+if stat --version 2>/dev/null | grep -q "GNU coreutils"; then
+  _STAT_MTIME_FMT=(-c '%Y')
+else
+  _STAT_MTIME_FMT=(-f '%m')
+fi
+mtime() {
+  stat "${_STAT_MTIME_FMT[@]}" "$1"
+}
+
 PASS=0
 FAIL=0
 
@@ -199,7 +211,7 @@ test_refuse_malformed_hooks_object() {
 
   echo '{"hooks": "invalid"}' > "$hooks_json"
   local before_mt
-  before_mt=$(stat -f '%m' "$hooks_json" 2>/dev/null || stat -c '%Y' "$hooks_json")
+  before_mt=$(mtime "$hooks_json")
   local before_sha
   before_sha=$(shasum -a 256 < "$hooks_json" | cut -d' ' -f1)
 
@@ -209,7 +221,7 @@ test_refuse_malformed_hooks_object() {
   set -e
 
   local after_mt after_sha
-  after_mt=$(stat -f '%m' "$hooks_json" 2>/dev/null || stat -c '%Y' "$hooks_json")
+  after_mt=$(mtime "$hooks_json")
   after_sha=$(shasum -a 256 < "$hooks_json" | cut -d' ' -f1)
 
   assert "installer exited non-zero"       "[ '$rc' != 0 ]"
@@ -358,13 +370,13 @@ test_check_readonly() {
 
   run_installer "$home/.codex" --install >/dev/null
   local before_mt
-  before_mt=$(stat -f '%m' "$hooks_json" 2>/dev/null || stat -c '%Y' "$hooks_json")
+  before_mt=$(mtime "$hooks_json")
 
   sleep 1
   run_installer "$home/.codex" --check >/dev/null 2>&1 || true
 
   local after_mt
-  after_mt=$(stat -f '%m' "$hooks_json" 2>/dev/null || stat -c '%Y' "$hooks_json")
+  after_mt=$(mtime "$hooks_json")
   assert "hooks.json mtime unchanged after --check" "[ '$before_mt' = '$after_mt' ]"
 
   rm -rf "$home"
