@@ -54,18 +54,30 @@ if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ]; then
   COLOR_END=$'\033[0m'
 fi
 
-# stat(1) flag dialect differs between GNU coreutils and BSD/macOS. Detect
-# once and stash the formats so we don't have to "try one then the other"
-# (which is racy: GNU stat with `-f` doesn't error cleanly on BSD-style
-# format strings — it interprets `-f` as `--file-system` and produces
-# fs metadata, which silently breaks our mtime/mode reads).
-if stat --version 2>/dev/null | grep -q "GNU coreutils"; then
-  STAT_MTIME_FMT='-c %Y'
-  STAT_MODE_FMT='-c %a'
-else
-  STAT_MTIME_FMT='-f %m'
-  STAT_MODE_FMT='-f %Lp'
-fi
+# stat(1) flag dialect differs between GNU coreutils, BSD/macOS, and
+# minimal toolboxes (BusyBox/Alpine). Probe by output instead of by
+# `--version` so we don't fail silently on stats that aren't strictly
+# GNU but still accept GNU flags (or vice versa). The probe runs
+# against `$0` (this script), which is guaranteed to exist.
+_probe_stat_format() {
+  local out
+  if out=$(stat -c '%Y' "$0" 2>/dev/null); then
+    case "$out" in
+      ''|*[!0-9]*) ;;        # not a non-empty all-digits string
+      *) STAT_MTIME_FMT='-c %Y'; STAT_MODE_FMT='-c %a'; return 0 ;;
+    esac
+  fi
+  if out=$(stat -f '%m' "$0" 2>/dev/null); then
+    case "$out" in
+      ''|*[!0-9]*) ;;
+      *) STAT_MTIME_FMT='-f %m'; STAT_MODE_FMT='-f %Lp'; return 0 ;;
+    esac
+  fi
+  STAT_MTIME_FMT=''
+  STAT_MODE_FMT=''
+  return 1
+}
+_probe_stat_format || true
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -81,25 +93,36 @@ die()   { fail "$*"; exit 1; }
 # Helpers
 # ---------------------------------------------------------------------------
 
-# hash_file <path>  → SHA-256 hex on stdout (or "no-hash-tool")
+# hash_file <path>  → SHA-256 hex on stdout. Returns 1 (and prints
+# nothing) if no hash tool is available — callers MUST check the exit
+# status and refuse to compare hashes if it failed. (An earlier version
+# returned the literal string "no-hash-tool" for both arguments, which
+# silently caused `--uninstall` to treat any two files as "matching" and
+# delete a user's hand-edited hook script.)
 hash_file() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 < "$1" | cut -d' ' -f1
   elif command -v sha256sum >/dev/null 2>&1; then
     sha256sum < "$1" | cut -d' ' -f1
   else
-    echo "no-hash-tool"
+    return 1
   fi
 }
 
-# stat_mtime <path>  → unix epoch seconds (uses pre-detected stat flavor)
+# stat_mtime <path>  → unix epoch seconds (uses probed stat flavor;
+# returns 1 with empty output if no flavor was detected — callers degrade)
 stat_mtime() {
+  [ -n "$STAT_MTIME_FMT" ] || return 1
   # shellcheck disable=SC2086
   stat $STAT_MTIME_FMT "$1"
 }
 
-# stat_mode <path>  → octal mode digits, e.g. "755"
+# stat_mode <path>  → octal mode digits, e.g. "755" (or "?" if unknown)
 stat_mode() {
+  if [ -z "$STAT_MODE_FMT" ]; then
+    echo "?"
+    return 1
+  fi
   # shellcheck disable=SC2086
   stat $STAT_MODE_FMT "$1"
 }
@@ -241,13 +264,23 @@ cmd_uninstall() {
   fi
 
   # Remove hook script only if it matches the plugin's shipped source —
-  # don't nuke a user's hand-edited override.
+  # don't nuke a user's hand-edited override. Refuse outright if no hash
+  # tool is available, since we can't safely make the equality call.
   if [ -f "$DEST_HOOK" ]; then
-    if [ -f "$SRC_HOOK" ] && [ "$(hash_file "$DEST_HOOK")" = "$(hash_file "$SRC_HOOK")" ]; then
-      /bin/rm -f "$DEST_HOOK"
-      ok "Removed $DEST_HOOK"
+    if [ ! -f "$SRC_HOOK" ]; then
+      warn "$DEST_HOOK left in place (plugin source missing — cannot verify SHA)"
     else
-      warn "$DEST_HOOK differs from plugin source — left in place (manually rm if needed)"
+      local dest_h src_h
+      if dest_h=$(hash_file "$DEST_HOOK") && src_h=$(hash_file "$SRC_HOOK"); then
+        if [ "$dest_h" = "$src_h" ]; then
+          /bin/rm -f "$DEST_HOOK"
+          ok "Removed $DEST_HOOK"
+        else
+          warn "$DEST_HOOK differs from plugin source — left in place (manually rm if needed)"
+        fi
+      else
+        warn "$DEST_HOOK left in place (no SHA-256 tool found; cannot verify integrity)"
+      fi
     fi
   fi
 
@@ -273,6 +306,13 @@ cmd_check() {
   else
     fail "jq not found on PATH — install jq before continuing"
     exit_code=1
+  fi
+
+  # 1a. hooks.json symlink advisory (--install will refuse a symlinked
+  #     target, so flag it preemptively even though --check itself is
+  #     read-only).
+  if [ -L "$HOOKS_JSON" ]; then
+    warn "$HOOKS_JSON is a symlink — \`--install\` / \`--uninstall\` will refuse to touch it"
   fi
 
   # 1. Stop entry registered for our hook command
@@ -306,14 +346,16 @@ cmd_check() {
   # 3. Script integrity vs plugin source
   if [ -f "$DEST_HOOK" ] && [ -f "$SRC_HOOK" ]; then
     local dest_h src_h
-    dest_h=$(hash_file "$DEST_HOOK")
-    src_h=$(hash_file "$SRC_HOOK")
-    if [ "$dest_h" = "$src_h" ]; then
-      ok "hook script matches plugin source (sha256=${dest_h:0:12}…)"
+    if dest_h=$(hash_file "$DEST_HOOK") && src_h=$(hash_file "$SRC_HOOK"); then
+      if [ "$dest_h" = "$src_h" ]; then
+        ok "hook script matches plugin source (sha256=${dest_h:0:12}…)"
+      else
+        warn "hook script differs from plugin source — re-run --install to update"
+        warn "  installed: ${dest_h:0:12}…"
+        warn "  plugin:    ${src_h:0:12}…"
+      fi
     else
-      warn "hook script differs from plugin source — re-run --install to update"
-      warn "  installed: ${dest_h:0:12}…"
-      warn "  plugin:    ${src_h:0:12}…"
+      warn "no SHA-256 tool found (shasum / sha256sum missing) — cannot verify integrity"
     fi
   fi
 

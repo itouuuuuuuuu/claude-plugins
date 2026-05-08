@@ -20,13 +20,29 @@ SRC_HOOK="$PLUGIN_ROOT/codex-hook/tmux-codex-chat-stop.sh"
 [ -f "$SRC_HOOK" ]  || { echo "FATAL: hook source missing at $SRC_HOOK" >&2; exit 2; }
 
 # Portable mtime helper. GNU stat (Linux) uses `-c %Y`, BSD/macOS uses
-# `-f %m`. Mixing the two flavors with `||` fallback is unsafe because GNU
-# stat re-interprets `-f` as `--file-system` and may exit 0 with garbage.
-if stat --version 2>/dev/null | grep -q "GNU coreutils"; then
-  _STAT_MTIME_FMT=(-c '%Y')
-else
-  _STAT_MTIME_FMT=(-f '%m')
+# `-f %m`, BusyBox/Alpine uses neither cleanly. Probe by output rather
+# than `--version` so we don't fail silently on stats that aren't strictly
+# GNU but still accept GNU flags (or vice versa). The probe runs against
+# `$0` (this test script), which is guaranteed to exist.
+_probe_out=""
+_probe_match=0
+if _probe_out=$(stat -c '%Y' "$0" 2>/dev/null); then
+  case "$_probe_out" in
+    ''|*[!0-9]*) ;;
+    *) _STAT_MTIME_FMT=(-c '%Y'); _probe_match=1 ;;
+  esac
 fi
+if [ "$_probe_match" -eq 0 ] && _probe_out=$(stat -f '%m' "$0" 2>/dev/null); then
+  case "$_probe_out" in
+    ''|*[!0-9]*) ;;
+    *) _STAT_MTIME_FMT=(-f '%m'); _probe_match=1 ;;
+  esac
+fi
+if [ "$_probe_match" -eq 0 ]; then
+  echo "FATAL: no usable stat(1) flavor detected on this host" >&2
+  exit 2
+fi
+unset _probe_out _probe_match
 mtime() {
   stat "${_STAT_MTIME_FMT[@]}" "$1"
 }
