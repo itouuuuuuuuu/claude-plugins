@@ -1,0 +1,28 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-plugins",
+  "owner": {
+    "name": "Masafumi Ito",
+    "email": "ito.masafumi@classmethod.jp"
+  },
+  "metadata": {
+    "description": "Claude Code plugins by Masafumi Ito — integrations and workflows.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "tmux-codex-chat",
+      "description": "Send a prompt to OpenAI Codex CLI in another tmux pane and capture the answer via Codex's Stop hook (no UI polling).",
+      "version": "1.0.0",
+      "author": {
+        "name": "Masafumi Ito",
+        "email": "ito.masafumi@classmethod.jp"
+      },
+      "homepage": "https://github.com/itouuuuuuuuu/claude-plugins/tree/main/plugins/tmux-codex-chat",
+      "license": "MIT",
+      "keywords": ["codex", "tmux", "hook", "openai"],
+      "category": "productivity",
+      "source": "./plugins/tmux-codex-chat"
+    }
+  ]
+}

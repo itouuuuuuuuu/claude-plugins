@@ -1,0 +1,13 @@
+{
+  "name": "tmux-codex-chat",
+  "version": "1.0.0",
+  "description": "Send a prompt to OpenAI Codex CLI running in another tmux pane and capture the answer via Codex's Stop hook (no UI polling).",
+  "author": {
+    "name": "Masafumi Ito",
+    "email": "ito.masafumi@classmethod.jp",
+    "url": "https://github.com/itouuuuuuuuu"
+  },
+  "homepage": "https://github.com/itouuuuuuuuu/claude-plugins/tree/main/plugins/tmux-codex-chat",
+  "license": "MIT",
+  "keywords": ["codex", "tmux", "hook", "skill", "openai"]
+}
