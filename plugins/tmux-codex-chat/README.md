@@ -49,7 +49,21 @@ chmod +x ~/.codex/hooks/tmux-codex-chat-stop.sh
 
 ### 3. Register the Stop hook in `~/.codex/hooks.json`
 
-Add the following entry to the `Stop` array in `~/.codex/hooks.json`. If the file does not exist yet, create it with the full content shown:
+> ⚠️ **Do not replace an existing `hooks.json`.** Preserve every existing top-level key (`PreToolUse`, `PostToolUse`, …) and any existing `Stop` entries — only **append** one new wrapper object to `hooks.Stop`. The previous installer staged this merge atomically; with the manual procedure, that responsibility moves to you.
+
+Before editing, sanity-check the file and take a backup:
+
+```bash
+test ! -L ~/.codex/hooks.json || echo "WARNING: hooks.json is a symlink — edit the link target intentionally"
+[ -f ~/.codex/hooks.json ] && cp -p ~/.codex/hooks.json ~/.codex/hooks.json.bak.$(date +%Y%m%d-%H%M%S)
+[ -f ~/.codex/hooks.json ] && jq -e '
+  type == "object"
+  and ((.hooks // {}) | type == "object")
+  and ((.hooks.Stop // []) | type == "array")
+' ~/.codex/hooks.json >/dev/null && echo "hooks.json structure: OK"
+```
+
+If `~/.codex/hooks.json` does **not** exist yet, create it with the full content below. If it already exists, add only the inner `{ "hooks": [ … ] }` wrapper to the `hooks.Stop` array (see "merge example" further down):
 
 ```json
 {
@@ -71,9 +85,42 @@ Add the following entry to the `Stop` array in `~/.codex/hooks.json`. If the fil
 
 > Replace `/Users/<you>` with your actual home directory — Codex does not expand `~` here.
 
-If `hooks.json` already has `Stop` entries, append the inner `{ "hooks": [ … ] }` wrapper to the existing array; do not nest it inside another wrapper.
+#### Merge example (append, not replace)
+
+Existing `~/.codex/hooks.json` (e.g. with a `PreToolUse` and an unrelated `Stop`):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "hooks": [{ "type": "command", "command": "/path/to/your/own-pretool.sh" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "/path/to/your/own-stop.sh" }] }
+    ]
+  }
+}
+```
+
+After adding the tmux-codex-chat entry — `PreToolUse` and the existing `Stop` entry are untouched; one new wrapper is appended to `hooks.Stop`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      { "hooks": [{ "type": "command", "command": "/path/to/your/own-pretool.sh" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "/path/to/your/own-stop.sh" }] },
+      { "hooks": [{ "type": "command", "command": "/Users/<you>/.codex/hooks/tmux-codex-chat-stop.sh", "timeout": 10 }] }
+    ]
+  }
+}
+```
 
 ### 4. Enable hooks in `~/.codex/config.toml`
+
+If `[features]` already exists in `~/.codex/config.toml`, add only `codex_hooks = true` **inside that existing table** — do not create a second `[features]` section (TOML rejects duplicate tables). Otherwise, add the whole block:
 
 ```toml
 [features]
@@ -92,7 +139,7 @@ jq '.hooks.Stop' ~/.codex/hooks.json
 grep -E '^\s*codex_hooks\s*=\s*true' ~/.codex/config.toml && echo "codex_hooks: OK"
 ```
 
-All three should report cleanly. If any do, fix the corresponding step above and restart Codex.
+All three should report cleanly. If any do **not**, fix the corresponding step above and restart Codex.
 
 ## Update
 
@@ -112,8 +159,16 @@ Then restart Codex.
 
 ## Uninstall
 
-1. Edit `~/.codex/hooks.json` and remove the entry whose `command` ends in `tmux-codex-chat-stop.sh`.
-2. Remove the hook script:
+> ⚠️ If you've **edited `~/.codex/hooks/tmux-codex-chat-stop.sh`** by hand, diff it or back it up before step 2 — the previous installer's `--uninstall` only deleted the script when its SHA matched the bundled source, but the manual `rm` below removes it unconditionally. Compare with `diff ~/.codex/hooks/tmux-codex-chat-stop.sh "$(find ~/.claude/plugins/cache -path '*/tmux-codex-chat/*/codex-hook/tmux-codex-chat-stop.sh' -print -quit)"` before removing.
+
+1. Take a backup of `hooks.json`, edit it, and remove the entry whose `command` ends in `tmux-codex-chat-stop.sh`. Leave every other top-level key and Stop entry alone.
+
+   ```bash
+   cp -p ~/.codex/hooks.json ~/.codex/hooks.json.bak.$(date +%Y%m%d-%H%M%S)
+   # then edit ~/.codex/hooks.json
+   ```
+
+2. Remove the hook script (after the diff check above):
 
    ```bash
    rm ~/.codex/hooks/tmux-codex-chat-stop.sh
