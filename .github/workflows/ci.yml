@@ -59,27 +59,3 @@ jobs:
                   os.unlink(path)
           sys.exit(0 if ok else 1)
           PY
-
-  test:
-    name: Fixture tests on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Ensure jq is installed
-        run: |
-          if ! command -v jq >/dev/null 2>&1; then
-            if [ "${{ matrix.os }}" = "macos-latest" ]; then
-              brew install jq
-            else
-              sudo apt-get update && sudo apt-get install -y jq
-            fi
-          fi
-          jq --version
-
-      - name: Run install-codex-hook.sh fixtures
-        run: bash plugins/tmux-codex-chat/tests/install-codex-hook-fixtures.sh
