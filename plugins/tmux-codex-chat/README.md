@@ -133,7 +133,29 @@ hooks = true
 
 Codex reads `hooks.json` only once at session start, so kill any running Codex sessions (`/exit` or `Ctrl-D`) and re-launch `codex`.
 
-### 6. Verify
+### 6. Review and approve the hook
+
+After restarting Codex CLI, it may warn that newly installed hooks need review before they can run:
+
+```text
+⚠ 1 hook needs review before it can run. Open /hooks to review it.
+```
+
+Open the hook review screen inside Codex:
+
+```text
+/hooks
+```
+
+Review the `Stop` hook command and approve it if it points to:
+
+```text
+/Users/<you>/.codex/hooks/tmux-codex-chat-stop.sh
+```
+
+Until the hook is approved, Codex will not run it, and this skill may time out while waiting for the completion file.
+
+### 7. Verify
 
 ```bash
 test -x ~/.codex/hooks/tmux-codex-chat-stop.sh && echo "hook script: OK"
@@ -205,11 +227,12 @@ The skill auto-discovers Codex panes inside the **current tmux session** (other 
 
 ### Skill silently times out, never sees Codex finish
 
-Re-run the [Verify](#6-verify) commands. Most causes:
+Re-run the [Verify](#7-verify) commands. Most causes:
 
 - `~/.codex/hooks.json` lacks the Stop entry (step 3 missed).
 - `hooks = true` not set in `[features]` of `~/.codex/config.toml` (step 4 missed). If you see Codex warn `[features].codex_hooks is deprecated`, rename the old key to `hooks` and restart Codex.
 - Codex CLI was started **before** you finished steps 3–4 (it reads `hooks.json` only at boot — restart it).
+- The `Stop` hook is still pending review in `/hooks` and has not been approved yet (step 6 missed).
 
 ### Hook script differs from plugin source after `/plugin update`
 
