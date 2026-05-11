@@ -24,7 +24,7 @@ Design guarantees (encoded in the hook + skill):
 
 - macOS or Linux with `tmux`
 - [Claude Code](https://www.claude.com/product/claude-code) CLI
-- [OpenAI Codex CLI](https://developers.openai.com/codex/cli) **v0.128 or newer** (Stop hook support)
+- [OpenAI Codex CLI](https://developers.openai.com/codex/cli) **v0.129 or newer** (Stop hook support landed in v0.128, and the `[features].hooks` key that replaces the now-deprecated `[features].codex_hooks` was introduced in v0.129)
 - `jq` on `PATH`
 
 ## Install
@@ -120,12 +120,14 @@ After adding the tmux-codex-chat entry — `PreToolUse` and the existing `Stop` 
 
 ### 4. Enable hooks in `~/.codex/config.toml`
 
-If `[features]` already exists in `~/.codex/config.toml`, add only `codex_hooks = true` **inside that existing table** — do not create a second `[features]` section (TOML rejects duplicate tables). Otherwise, add the whole block:
+If `[features]` already exists in `~/.codex/config.toml`, add only `hooks = true` **inside that existing table** — do not create a second `[features]` section (TOML rejects duplicate tables). Otherwise, add the whole block:
 
 ```toml
 [features]
-codex_hooks = true
+hooks = true
 ```
+
+> Codex CLI previously used `codex_hooks = true`; that key is now deprecated and Codex emits a warning when it is present. Use `hooks = true` instead.
 
 ### 5. Restart Codex CLI
 
@@ -136,7 +138,7 @@ Codex reads `hooks.json` only once at session start, so kill any running Codex s
 ```bash
 test -x ~/.codex/hooks/tmux-codex-chat-stop.sh && echo "hook script: OK"
 jq '.hooks.Stop' ~/.codex/hooks.json
-grep -E '^\s*codex_hooks\s*=\s*true' ~/.codex/config.toml && echo "codex_hooks: OK"
+grep -E '^\s*hooks\s*=\s*true' ~/.codex/config.toml && echo "hooks: OK"
 ```
 
 All three should report cleanly. If any do **not**, fix the corresponding step above and restart Codex.
@@ -206,7 +208,7 @@ The skill auto-discovers Codex panes inside the **current tmux session** (other 
 Re-run the [Verify](#6-verify) commands. Most causes:
 
 - `~/.codex/hooks.json` lacks the Stop entry (step 3 missed).
-- `codex_hooks = true` not set in `~/.codex/config.toml` (step 4 missed).
+- `hooks = true` not set in `[features]` of `~/.codex/config.toml` (step 4 missed). If you see Codex warn `[features].codex_hooks is deprecated`, rename the old key to `hooks` and restart Codex.
 - Codex CLI was started **before** you finished steps 3–4 (it reads `hooks.json` only at boot — restart it).
 
 ### Hook script differs from plugin source after `/plugin update`
@@ -239,7 +241,7 @@ cp "$PWD/claude-plugins/plugins/tmux-codex-chat/codex-hook/tmux-codex-chat-stop.
 chmod +x ~/.codex/hooks/tmux-codex-chat-stop.sh
 ```
 
-Then continue from [step 3](#3-register-the-stop-hook-in-codexhooksjson) (register the Stop entry, set `codex_hooks = true`, restart Codex). To update, `git pull` and re-run the `cp` command.
+Then continue from [step 3](#3-register-the-stop-hook-in-codexhooksjson) (register the Stop entry, set `hooks = true` under `[features]`, restart Codex). To update, `git pull` and re-run the `cp` command.
 
 ## License
 

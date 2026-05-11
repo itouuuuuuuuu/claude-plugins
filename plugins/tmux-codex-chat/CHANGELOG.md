@@ -27,7 +27,7 @@ The Codex side is installed by hand (documented in [README](README.md#install)):
 
 1. `cp` the bundled `codex-hook/tmux-codex-chat-stop.sh` into `~/.codex/hooks/`.
 2. Add a `Stop` entry pointing at it in `~/.codex/hooks.json`.
-3. Ensure `codex_hooks = true` under `[features]` in `~/.codex/config.toml`.
+3. Ensure `hooks = true` under `[features]` in `~/.codex/config.toml` (the older `codex_hooks` key is deprecated).
 4. Restart Codex (it reads `hooks.json` only at session start).
 
 This was deliberately kept as a documented manual procedure rather than an installer script: editing user-owned `~/.codex/hooks.json` programmatically carries non-trivial risk (symlinked dotfiles, malformed pre-existing config, racing edits) and the maintenance cost of a defensive installer outweighs the convenience for a one-time, two-step setup.

@@ -18,7 +18,7 @@ Approval dialogs do not end Codex's turn, so `Stop` never fires while paused on 
 
 ## Prerequisites
 
-1. `~/.codex/config.toml` has `features.codex_hooks = true`.
+1. `~/.codex/config.toml` has `features.hooks = true` (the older `features.codex_hooks` key is deprecated).
 2. `~/.codex/hooks.json` registers a `Stop` hook pointing at `~/.codex/hooks/tmux-codex-chat-stop.sh`.
 3. The hook script is executable. `jq` is on PATH.
 4. **Codex CLI was started AFTER the hook was installed.** Codex reads `hooks.json` once at session boot and does not reload it. If hook config changed since the target pane was started, the user must `Ctrl-D`/`/exit` and restart Codex in that pane — otherwise this skill silently times out.
@@ -29,7 +29,7 @@ Health-check:
 hook_ok() {
   test -x ~/.codex/hooks/tmux-codex-chat-stop.sh || return 1
   jq -e '.hooks.Stop' ~/.codex/hooks.json >/dev/null 2>&1 || return 1
-  grep -qE 'codex_hooks[[:space:]]*=[[:space:]]*true' ~/.codex/config.toml || return 1
+  grep -qE '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*true' ~/.codex/config.toml || return 1
   command -v jq >/dev/null
 }
 hook_ok && echo OK_HOOK_READY || echo MISSING
