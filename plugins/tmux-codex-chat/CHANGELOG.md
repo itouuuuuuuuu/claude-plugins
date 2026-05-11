@@ -1,5 +1,13 @@
 # Changelog — tmux-codex-chat
 
+## Unreleased
+
+### Documentation
+
+- Install / Update / Uninstall guidance now fetches `tmux-codex-chat-stop.sh` directly from the GitHub repository via `curl`, instead of copying out of the versioned `~/.claude/plugins/cache` path. Users can re-run the same `curl` command to update without resolving the cache location.
+- `hooks.json` examples now use `$HOME/.codex/hooks/tmux-codex-chat-stop.sh` (expanded at command invocation time) in place of literal `/Users/<you>/…` paths.
+- Uninstall section's "diff before remove" check now compares against the raw GitHub source rather than the plugin cache.
+
 ## [1.0.0] — 2026-05-08
 
 Initial public release. Carries forward the local v3 design that was iterated on with multiple rounds of [Codex CLI](https://developers.openai.com/codex/cli) self-review.

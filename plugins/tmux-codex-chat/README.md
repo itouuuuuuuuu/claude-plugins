@@ -2,7 +2,7 @@
 
 A Claude Code skill that sends a prompt to the [OpenAI Codex CLI](https://developers.openai.com/codex/cli) running in another **tmux pane**, then captures Codex's answer via Codex's `Stop` hook — no UI-string polling. Because completion detection is event-driven, the skill responds within ~0.3 s of Codex finishing, and survives Codex UI changes.
 
-> The skill spans two CLIs: the *skill body* runs inside Claude Code, but the *completion signal* comes from a hook that lives on the Codex side. Plugin manifests can't reach across CLIs, so the Codex-side install is two manual steps: copy one shell script, and add one entry to `~/.codex/hooks.json`. See [Install](#install).
+> The skill spans two CLIs: the *skill body* runs inside Claude Code, but the *completion signal* comes from a hook that lives on the Codex side. Plugin manifests can't reach across CLIs, so the Codex-side install is two manual steps: `curl` one shell script from this repository, and add one entry to `~/.codex/hooks.json`. See [Install](#install).
 
 ## How it works
 
@@ -38,14 +38,17 @@ Design guarantees (encoded in the hook + skill):
 
 ### 2. Copy the Stop hook script into `~/.codex/hooks/`
 
-The plugin cache path is versioned, so resolve it dynamically:
+Download the script directly from this repository:
 
 ```bash
-HOOK_SRC=$(find ~/.claude/plugins/cache -path '*/tmux-codex-chat/*/codex-hook/tmux-codex-chat-stop.sh' -print -quit)
 mkdir -p ~/.codex/hooks
-cp "$HOOK_SRC" ~/.codex/hooks/tmux-codex-chat-stop.sh
+curl -fsSL \
+  https://raw.githubusercontent.com/itouuuuuuuuu/claude-plugins/main/plugins/tmux-codex-chat/codex-hook/tmux-codex-chat-stop.sh \
+  -o ~/.codex/hooks/tmux-codex-chat-stop.sh
 chmod +x ~/.codex/hooks/tmux-codex-chat-stop.sh
 ```
+
+> Review the script before making it executable if you'd rather not trust a raw download. The source of truth lives at [`plugins/tmux-codex-chat/codex-hook/tmux-codex-chat-stop.sh`](codex-hook/tmux-codex-chat-stop.sh).
 
 ### 3. Register the Stop hook in `~/.codex/hooks.json`
 
@@ -73,7 +76,7 @@ If `~/.codex/hooks.json` does **not** exist yet, create it with the full content
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/<you>/.codex/hooks/tmux-codex-chat-stop.sh",
+            "command": "$HOME/.codex/hooks/tmux-codex-chat-stop.sh",
             "timeout": 10
           }
         ]
@@ -83,7 +86,7 @@ If `~/.codex/hooks.json` does **not** exist yet, create it with the full content
 }
 ```
 
-> Replace `/Users/<you>` with your actual home directory — Codex does not expand `~` here.
+> Codex runs the `command` through a shell, so `$HOME` is expanded at invocation time. Do **not** use a bare `~` here — it is not expanded.
 
 #### Merge example (append, not replace)
 
@@ -112,7 +115,7 @@ After adding the tmux-codex-chat entry — `PreToolUse` and the existing `Stop` 
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "/path/to/your/own-stop.sh" }] },
-      { "hooks": [{ "type": "command", "command": "/Users/<you>/.codex/hooks/tmux-codex-chat-stop.sh", "timeout": 10 }] }
+      { "hooks": [{ "type": "command", "command": "$HOME/.codex/hooks/tmux-codex-chat-stop.sh", "timeout": 10 }] }
     ]
   }
 }
@@ -147,11 +150,7 @@ Open the hook review screen inside Codex:
 /hooks
 ```
 
-Review the `Stop` hook command and approve it if it points to:
-
-```text
-/Users/<you>/.codex/hooks/tmux-codex-chat-stop.sh
-```
+Review the `Stop` hook command and approve it if it points to your `tmux-codex-chat-stop.sh` (Codex displays the command string as written in `hooks.json`, so you should see `$HOME/.codex/hooks/tmux-codex-chat-stop.sh` if you followed step 3 verbatim).
 
 Until the hook is approved, Codex will not run it, and this skill may time out while waiting for the completion file.
 
@@ -167,15 +166,16 @@ All three should report cleanly. If any do **not**, fix the corresponding step a
 
 ## Update
 
-`/plugin update` only refreshes the Claude Code skill — the Codex-side hook script is a copy under `~/.codex/hooks/`, so re-copy it whenever the plugin's bundled version changes:
+`/plugin update` only refreshes the Claude Code skill — the Codex-side hook script is a copy under `~/.codex/hooks/`, so re-download it from this repository whenever the upstream version changes:
 
 ```text
 /plugin update tmux-codex-chat@itouuuuuuuuu-plugins
 ```
 
 ```bash
-HOOK_SRC=$(find ~/.claude/plugins/cache -path '*/tmux-codex-chat/*/codex-hook/tmux-codex-chat-stop.sh' -print -quit)
-cp "$HOOK_SRC" ~/.codex/hooks/tmux-codex-chat-stop.sh
+curl -fsSL \
+  https://raw.githubusercontent.com/itouuuuuuuuu/claude-plugins/main/plugins/tmux-codex-chat/codex-hook/tmux-codex-chat-stop.sh \
+  -o ~/.codex/hooks/tmux-codex-chat-stop.sh
 chmod +x ~/.codex/hooks/tmux-codex-chat-stop.sh
 ```
 
@@ -183,7 +183,12 @@ Then restart Codex.
 
 ## Uninstall
 
-> ⚠️ If you've **edited `~/.codex/hooks/tmux-codex-chat-stop.sh`** by hand, diff it or back it up before step 2 — the previous installer's `--uninstall` only deleted the script when its SHA matched the bundled source, but the manual `rm` below removes it unconditionally. Compare with `diff ~/.codex/hooks/tmux-codex-chat-stop.sh "$(find ~/.claude/plugins/cache -path '*/tmux-codex-chat/*/codex-hook/tmux-codex-chat-stop.sh' -print -quit)"` before removing.
+> ⚠️ If you've **edited `~/.codex/hooks/tmux-codex-chat-stop.sh`** by hand, diff it or back it up before step 2 — the `rm` below removes it unconditionally. Compare against the upstream source first:
+>
+> ```bash
+> diff ~/.codex/hooks/tmux-codex-chat-stop.sh \
+>   <(curl -fsSL https://raw.githubusercontent.com/itouuuuuuuuu/claude-plugins/main/plugins/tmux-codex-chat/codex-hook/tmux-codex-chat-stop.sh)
+> ```
 
 1. Take a backup of `hooks.json`, edit it, and remove the entry whose `command` ends in `tmux-codex-chat-stop.sh`. Leave every other top-level key and Stop entry alone.
 
@@ -234,9 +239,9 @@ Re-run the [Verify](#7-verify) commands. Most causes:
 - Codex CLI was started **before** you finished steps 3–4 (it reads `hooks.json` only at boot — restart it).
 - The `Stop` hook is still pending review in `/hooks` and has not been approved yet (step 6 missed).
 
-### Hook script differs from plugin source after `/plugin update`
+### Hook script is out of date after `/plugin update`
 
-Re-copy the script per the [Update](#update) section. The Stop hook executes the *installed* `~/.codex/hooks/tmux-codex-chat-stop.sh`, which doesn't auto-sync with the plugin cache.
+The Stop hook executes the *installed* `~/.codex/hooks/tmux-codex-chat-stop.sh`, which is a downloaded copy and does not auto-sync. Re-run the `curl` command in the [Update](#update) section to fetch the latest version from this repository.
 
 ### Skill returns "TIMEOUT after 5 min"
 
@@ -264,7 +269,7 @@ cp "$PWD/claude-plugins/plugins/tmux-codex-chat/codex-hook/tmux-codex-chat-stop.
 chmod +x ~/.codex/hooks/tmux-codex-chat-stop.sh
 ```
 
-Then continue from [step 3](#3-register-the-stop-hook-in-codexhooksjson) (register the Stop entry, set `hooks = true` under `[features]`, restart Codex). To update, `git pull` and re-run the `cp` command.
+Then continue from [step 3](#3-register-the-stop-hook-in-codexhooksjson) (register the Stop entry with `$HOME/.codex/hooks/tmux-codex-chat-stop.sh`, set `hooks = true` under `[features]`, restart Codex). To update, `git pull` and re-run the `cp` command.
 
 ## License
 
