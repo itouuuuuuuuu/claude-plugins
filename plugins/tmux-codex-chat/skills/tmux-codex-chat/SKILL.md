@@ -12,7 +12,7 @@ One invocation = one prompt → one captured answer. Follow-ups require re-invoc
 
 The skill injects a unique marker `[CODEX_CHAT_REQ:<full-uuid>]` into the visible prompt and creates a pending file. Codex's `Stop` hook (`~/.codex/hooks/tmux-codex-chat-stop.sh`) parses the **latest user message** of the transcript via `jq -rs`, and if the extracted UUID has a matching pending file it atomically writes `$RUNDIR/done-<uuid>.json`. The skill blocks on that file.
 
-Approval dialogs do not end Codex's turn, so `Stop` never fires while paused on one — a parallel watcher subshell scans the pane every ~2 s (with a 0.5 s burst for the first 10 s) for dialog patterns and trips an approval sentinel file instead.
+Approval dialogs do not end Codex's turn, so `Stop` never fires while paused on one — a parallel watcher subshell scans the pane every ~2 s (with a 0.5 s burst for the first 10 s) for dialog patterns and trips an approval sentinel file instead. The 0.5 s burst is intentionally faster than the mirror `tmux-claude-chat` skill's 1 s cadence: surfacing the dialog promptly matters more during the first few seconds, while the 2 s steady-state limits capture cost.
 
 `$RUNDIR = /tmp/codex-chat-$UID` (mode 700, ownership-checked) holds: `pending-<uuid>`, `done-<uuid>.json`, `approval-<uuid>.txt`, `prompt-<ts>-<uuid>.md`, and `stop-hook.log`.
 
@@ -93,7 +93,22 @@ RUNDIR="/tmp/codex-chat-${UID:-$(id -u)}"
 mkdir -m 700 -p "$RUNDIR" && chmod 700 "$RUNDIR"
 [ -O "$RUNDIR" ] || { echo "$RUNDIR not owned by us"; exit 1; }
 
-REQ=$(/usr/bin/uuidgen)            # absolute path bypasses any user alias
+gen_uuid() {
+  # /usr/bin/uuidgen first (absolute path bypasses any user alias on macOS).
+  if [ -x /usr/bin/uuidgen ]; then
+    /usr/bin/uuidgen
+  elif command -v uuidgen >/dev/null 2>&1; then
+    uuidgen
+  elif [ -r /proc/sys/kernel/random/uuid ]; then
+    cat /proc/sys/kernel/random/uuid
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  else
+    echo "No UUID generator found" >&2
+    return 1
+  fi
+}
+REQ=$(gen_uuid) || exit 1
 PENDING="$RUNDIR/pending-$REQ"
 DONE_FILE="$RUNDIR/done-$REQ.json"
 APPROVAL_FILE="$RUNDIR/approval-$REQ.txt"
@@ -121,13 +136,13 @@ tmux send-keys -t "$PANE" Enter
 ts=$(date +%Y%m%d-%H%M%S)
 PROMPT_FILE="$RUNDIR/prompt-$ts-$REQ.md"
 umask 077
-cat > "$PROMPT_FILE" <<'EOF'
-[CODEX_CHAT_REQ:__REQ__]
-(internal routing tag — please ignore in your reply)
-
+{
+  printf '[CODEX_CHAT_REQ:%s]\n' "$REQ"
+  printf '(internal routing tag — please ignore in your reply)\n\n'
+  cat <<'EOF'
 <full prompt body — any characters, the heredoc terminator is single-quoted>
 EOF
-sed -i '' "s/__REQ__/$REQ/" "$PROMPT_FILE"
+} > "$PROMPT_FILE"
 
 ref="[CODEX_CHAT_REQ:$REQ] Please read $PROMPT_FILE and respond to the request inside it. Do not echo or strip the [CODEX_CHAT_REQ:...] marker — it is internal."
 printf '%s' "$ref" | tmux load-buffer -
@@ -156,6 +171,9 @@ Wait ~1 s, capture once. If the prompt body still sits visibly above the `›` l
 ```bash
 # Parallel approval watcher: 0.5s for first 10s, then 2s. Exits when either
 # sentinel appears, so we don't strictly need to kill it.
+# (Intentionally faster than tmux-claude-chat's 1s cadence: Codex approval
+#  dialogs are useful to surface promptly, and the short initial burst keeps
+#  that latency low while the later 2s cadence limits steady-state capture cost.)
 (
   i=0
   while :; do
@@ -249,7 +267,7 @@ If the health-check failed, fall through to a UI-string poll: baseline `$(tmux c
 | Session name | `tmux display-message -p '#S'` |
 | Panes (current session) | `tmux list-panes -s -t "$SESSION" -F "#{pane_id} #{pane_current_command}"` |
 | Capture screen / scrollback | `tmux capture-pane -t %N -p` / `tmux capture-pane -t %N -p -S -` |
-| Generate REQ | `/usr/bin/uuidgen` (absolute path — alias-proof) |
+| Generate REQ | `gen_uuid` fallback (`/usr/bin/uuidgen` → `uuidgen` → `/proc/sys/kernel/random/uuid` → `python3`) |
 | Submit | `tmux send-keys -t %N Enter` (separate from `-l` text) |
 | Wait for done | `until [ -f "$DONE_FILE" ]; do sleep 0.3; done` |
 | Inspect last hook activity | `tail "$RUNDIR/stop-hook.log"` |

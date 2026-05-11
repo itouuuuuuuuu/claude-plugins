@@ -1,6 +1,6 @@
 {
   "name": "tmux-codex-chat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Send a prompt to OpenAI Codex CLI running in another tmux pane and capture the answer via Codex's Stop hook (no UI polling).",
   "author": {
     "name": "Masafumi Ito",

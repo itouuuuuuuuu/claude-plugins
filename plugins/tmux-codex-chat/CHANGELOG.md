@@ -1,6 +1,15 @@
 # Changelog — tmux-codex-chat
 
-## Unreleased
+## [1.0.1] — 2026-05-11
+
+Portability fixes from a symmetry review against the mirror skill `tmux-claude-chat` in `itouuuuuuuuu/codex-plugins`, plus an unrelated documentation refresh for the Codex-side install procedure. Behavior on macOS is unchanged.
+
+### Skill (`SKILL.md`)
+
+- UUID generation now falls back through `/usr/bin/uuidgen` → `uuidgen` → `/proc/sys/kernel/random/uuid` → `python3` so the skill runs on Linux out of the box. The previous absolute-path `/usr/bin/uuidgen` was macOS-only despite the README advertising "macOS or Linux".
+- Prompt-file template (§4b) builds the header with `printf` and appends the body via a single-quoted heredoc, eliminating the BSD-only `sed -i ''` post-process (GNU `sed -i` rejects the empty backup argument).
+- Approval-watcher polling cadence (0.5 s × 20, then 2 s) is now annotated as an intentional asymmetry with the Claude-side mirror skill (which uses a slower 1 s burst).
+- `Common commands` table's `Generate REQ` row updated to reflect the fallback chain.
 
 ### Documentation
 
