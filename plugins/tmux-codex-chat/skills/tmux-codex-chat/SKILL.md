@@ -23,7 +23,7 @@ Approval dialogs do not end Codex's turn, so `Stop` never fires while paused on 
 3. The hook script is executable. `jq` is on PATH.
 4. **Codex CLI was started AFTER the hook was installed.** Codex reads `hooks.json` once at session boot and does not reload it. If hook config changed since the target pane was started, the user must `Ctrl-D`/`/exit` and restart Codex in that pane — otherwise this skill silently times out.
 
-Health-check (use exactly; the precedence in older one-liners was wrong):
+Health-check:
 
 ```bash
 hook_ok() {
@@ -79,16 +79,12 @@ If the pane is in a different session, refuse — do not silently retarget. Then
 The following are **NOT** busy signals — proceed without confirmation:
 
 - The `Create a plan?  shift + tab use Plan mode   esc dismiss` hint.
-- A non-empty `›` line that contains **Codex ghost-text autocomplete** (the dimmed placeholder Codex shows in the empty input area). It appears as a verbatim recent prompt or a slash-command suggestion — e.g. `› Run /review on my current changes`, `› /review`, `› /diff`. In the observed empty-input ghost-text state, `tmux load-buffer | paste-buffer` overwrites it cleanly.
+- A non-empty `›` line is not busy only when it matches a known Codex ghost-text pattern:
+  - starts with `/<slash-command>` such as `/review`, `/diff`, `/model`, `/statusline`
+  - starts with `Run /<slash-command>`
+  - matches a previously-sent prompt verbatim
 
-  **Concrete ghost-text patterns (single-line `›` content matching any of these → not busy):**
-  - starts with `/<slash-command>` (e.g. `/review`, `/diff`, `/model`, `/statusline`),
-  - starts with `Run /<slash-command>` (Codex's most common autocomplete prefix — this is what triggered this rule),
-  - matches a previously-sent prompt verbatim (Codex re-shows the last prompt as a hint after a turn ends).
-
-  **Otherwise — non-empty `›` matching none of the above → treat as residual user input.** Surface the capture and ask the user (wait / cancel / overwrite). Real half-typed prompts are often short, single-line, and imperative (`review the diff`, `fix tests`, `summarize this`, `run the build`) — do **not** generalize "looks short, looks suggestion-style" into a send-anyway rule, because that overlaps with real user drafts.
-
-  **Ambiguous edge case** (line strongly resembles a Codex autocomplete prefix above but fails an exact match — e.g. minor whitespace/casing variant): prefer to send. Do not extend this latitude to natural-language sentences or commands; ask before overwriting those.
+  Otherwise treat it as residual user input: surface the capture and ask before overwriting. For near-matches to the slash-command patterns, prefer sending; do not apply that latitude to natural-language drafts.
 
 ### 3. Generate REQ + create pending file
 
@@ -143,7 +139,7 @@ Notes:
 
 - The reference text in 4b carries the marker too, so the marker is always in the visible user message regardless of whether Codex reads the file.
 - `tmux load-buffer -` overwrites tmux clipboard buffer 0; mention to the user if they care about it.
-- Prompt files are not auto-deleted (Codex may re-read mid-response). Clean periodically with `rm "$RUNDIR/prompt-*.md"`.
+- Prompt files are not auto-deleted (Codex may re-read mid-response). Clean periodically with `rm -f "$RUNDIR"/prompt-*.md`.
 
 #### Hard rules
 
@@ -176,10 +172,7 @@ Wait ~1 s, capture once. If the prompt body still sits visibly above the `›` l
 ) &
 WATCHER_PID=$!
 
-# Block on whichever sentinel arrives. Default deadline is 5 min; bump
-# to 600/900 if the prompt is a long review or repo-wide audit (see the
-# `timeout)` branch below — once we hit the deadline, the answer is
-# effectively unrecoverable through this skill).
+# Default deadline is 5 min; use 600/900 for long reviews.
 DEADLINE=$(( $(date +%s) + 300 ))
 RESULT=timeout
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
@@ -216,23 +209,14 @@ EOF
     ;;
   timeout)
     LATEST=$(tmux capture-pane -t "$PANE" -p)
-    rm -f "$PENDING"   # prevent stale-replay risk on later turns
-    # IMPORTANT: removing the pending file means a *late* Codex completion
-    # (after the 5-minute window) will NOT produce a done-file — the hook
-    # silently skips because no pending exists for that REQ. This is
-    # intentional (otherwise stale markers in transcript could overwrite
-    # an unrelated future invocation), but it does mean the answer is
-    # effectively unrecoverable through this skill once we time out.
-    # Long-running reviews must either:
-    #   (a) extend DEADLINE before invocation (e.g. 600 or 900 seconds),
-    #   (b) be harvested manually from the pane scrollback, or
-    #   (c) be re-asked in a fresh invocation.
+    rm -f "$PENDING"   # drop pending so a late completion cannot replay into a future run
     cat <<EOF
 TIMEOUT — Codex did not finish within the 5-minute window.
    The pending file has been removed to prevent stale replay, so the
    Stop hook will NOT write $DONE_FILE even if Codex finishes later.
    Recover the answer manually from the pane scrollback, or re-invoke
-   the skill with a longer DEADLINE. Latest pane content follows:
+   the skill with a longer DEADLINE (e.g. 600 or 900 seconds).
+   Latest pane content follows:
 $LATEST
 EOF
     ;;
@@ -250,7 +234,7 @@ Do not claim Codex "approved", "completed", or "agreed" unless its captured text
 
 ### 8. Cleanup
 
-The `done`/`approval` files of the current run are removed in §6. `$PROMPT_FILE` is intentionally retained. Periodically `rm "$RUNDIR/prompt-*.md" "$RUNDIR/stop-hook.log"`.
+The `done`/`approval` files of the current run are removed in §6. `$PROMPT_FILE` is intentionally retained. Periodically `rm -f "$RUNDIR"/prompt-*.md "$RUNDIR"/stop-hook.log`.
 
 ## Fallback: UI polling (best-effort, hook-missing only)
 
