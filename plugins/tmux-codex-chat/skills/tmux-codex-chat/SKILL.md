@@ -154,7 +154,7 @@ Notes:
 
 - The reference text in 4b carries the marker too, so the marker is always in the visible user message regardless of whether Codex reads the file.
 - `tmux load-buffer -` overwrites tmux clipboard buffer 0; mention to the user if they care about it.
-- Prompt files are not auto-deleted (Codex may re-read mid-response). Clean periodically with `rm -f "$RUNDIR"/prompt-*.md`.
+- Prompt files are not auto-deleted (Codex may re-read mid-response). Clean periodically with `/bin/rm -f "$RUNDIR"/prompt-*.md`. Always use the absolute `/bin/rm` for cleanup of these disposable runtime files (see §8).
 
 #### Hard rules
 
@@ -204,11 +204,11 @@ wait "$WATCHER_PID" 2>/dev/null || true
 case "$RESULT" in
   done)
     ANSWER=$(jq -r '.last_assistant_message // ""' "$DONE_FILE")
-    rm -f "$DONE_FILE" "$PENDING"   # pending should already be gone, idempotent
+    /bin/rm -f "$DONE_FILE" "$PENDING"   # pending should already be gone, idempotent
     ;;
   approval)
     DIALOG=$(cat "$APPROVAL_FILE")
-    rm -f "$APPROVAL_FILE"
+    /bin/rm -f "$APPROVAL_FILE"
     # Pending file is left in place. Once the user resolves the dialog
     # in the Codex pane, Codex will finish the turn and the Stop hook
     # will write $DONE_FILE. The skill MUST surface the exact REQ and
@@ -227,7 +227,7 @@ EOF
     ;;
   timeout)
     LATEST=$(tmux capture-pane -t "$PANE" -p)
-    rm -f "$PENDING"   # drop pending so a late completion cannot replay into a future run
+    /bin/rm -f "$PENDING"   # drop pending so a late completion cannot replay into a future run
     cat <<EOF
 TIMEOUT — Codex did not finish within the 5-minute window.
    The pending file has been removed to prevent stale replay, so the
@@ -252,7 +252,9 @@ Do not claim Codex "approved", "completed", or "agreed" unless its captured text
 
 ### 8. Cleanup
 
-The `done`/`approval` files of the current run are removed in §6. `$PROMPT_FILE` is intentionally retained. Periodically `rm -f "$RUNDIR"/prompt-*.md "$RUNDIR"/stop-hook.log`.
+The `done`/`approval` files of the current run are removed in §6. `$PROMPT_FILE` is intentionally retained. Periodically `/bin/rm -f "$RUNDIR"/prompt-*.md "$RUNDIR"/stop-hook.log`.
+
+> **Always use the absolute `/bin/rm` for all cleanup in this skill** — never bare `rm`. `$RUNDIR` holds short-lived runtime transport files (pending/done/approval/prompt) that must be removed idempotently regardless of how the invoking shell has defined `rm`. `/bin/rm -f` guarantees that behavior with one statement.
 
 ## Fallback: UI polling (best-effort, hook-missing only)
 
