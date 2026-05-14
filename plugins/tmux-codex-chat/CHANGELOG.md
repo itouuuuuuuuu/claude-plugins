@@ -1,5 +1,20 @@
 # Changelog — tmux-codex-chat
 
+## [1.0.2] — 2026-05-14
+
+Strengthen the skill's auto-trigger description so review-style Japanese requests reliably invoke the skill instead of being answered in prose.
+
+### Skill (`SKILL.md`)
+
+- Rewrote the `description:` frontmatter to declare a hard auto-trigger contract: `MUST auto-trigger (do NOT merely describe what you would do — invoke the Skill tool immediately)`.
+- Enumerated the full set of Japanese review-style trigger phrases the host model is expected to map to this skill: `codex にレビューしてもらって`, `codex にレビューさせて`, `codex にレビュー依頼`, `codex でレビュー`, `codex に確認してもらって`, `codex にチェックしてもらって`, `codex に見てもらって`, `codex の意見が欲しい`, `codex に聞いて`, plus the prior `別 pane の codex にレビューさせて` / `%138 の codex に <X>` examples.
+- Added an explicit catch-all rule: any sentence that mentions `codex` together with any of レビュー / 確認 / チェック / 見て / 意見 / 聞いて / consult / ask / review / check / audit is a hard trigger, even if no tmux pane id is given (the skill discovers the pane itself in §1).
+- "Prefer this over `tmux-pane-send` / `tmux-pane-exec`" upgraded to `ALWAYS prefer this over …` so the host model does not fall back to the generic send/exec skills when a Codex CLI is the intended target.
+
+### No runtime changes
+
+The skill body (§0–§8, fallback, common-commands table) is untouched. Hook contract, pending-file gate, marker format, approval-watcher cadence, and the Stop-hook script are all unchanged — this release only governs **whether** the skill is invoked, not how it behaves once invoked.
+
 ## [1.0.1] — 2026-05-11
 
 Portability fixes from a symmetry review against the mirror skill `tmux-claude-chat` in `itouuuuuuuuu/codex-plugins`, plus an unrelated documentation refresh for the Codex-side install procedure. Behavior on macOS is unchanged.
