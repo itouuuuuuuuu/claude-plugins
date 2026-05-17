@@ -1,5 +1,25 @@
 # Changelog — tmux-codex-chat
 
+## [1.0.3] — 2026-05-17
+
+Tighten the `SKILL.md` `description:` frontmatter so it fits within Claude Code's per-entry skill listing cap (default `skillListingMaxDescChars = 1536`) without losing the auto-trigger contract or trigger phrases added in 1.0.2.
+
+### Skill (`SKILL.md`)
+
+- Rewrote `description:` (1853 → 1512 chars) while preserving:
+  - the MUST auto-trigger directive (`invoke the Skill tool immediately — do NOT only describe`),
+  - the hard-trigger rule (any sentence mentioning `codex` together with レビュー / 確認 / チェック / 見て / 意見 / 聞いて / consult / ask / review / check / audit),
+  - the Japanese example phrases (`codex にレビューしてもらって`, `codex にレビューさせて`, `codex でレビュー`, `codex に確認/チェック/見てもらって`, `codex の意見が欲しい`, `codex に聞いて`, `別 pane の codex にレビューさせて`, `%138 の codex に <X>`),
+  - the English example phrases (`ask codex`, `consult codex`, `have codex review`, `get codex to check`),
+  - the pane-detection contract (`pane_current_command` ∈ {`codex`, `node`} confirmed by `›` input prompt / `Context X% used` / `─ Worked for ... ─` separator / `OpenAI Codex` startup banner),
+  - the current-session-only constraint and the ambiguity-asks-the-user rule,
+  - and the `ALWAYS prefer this over tmux-pane-send / tmux-pane-exec` ordering.
+- Compressions applied: merged the four `codex にレビュー…` variants into three (`してもらって` / `させて` / `でレビュー`), merged `確認してもらって` / `チェックしてもらって` / `見てもらって` into a single `確認/チェック/見てもらって` line, dropped the "even if explicitly named" emphasis on the current-session rule, removed the "general-purpose" qualifier in front of `tmux-pane-send / tmux-pane-exec`, and dropped the redundant "with model name" qualifier from the `Context X% used` status-line description.
+
+### No runtime changes
+
+The skill body (§0–§8, fallback, common-commands table), hook contract, pending-file gate, marker format, approval-watcher cadence, and the Stop-hook script (`codex-hook/tmux-codex-chat-stop.sh`) are all unchanged. This release only resizes the auto-trigger metadata.
+
 ## [1.0.2] — 2026-05-14
 
 Strengthen the skill's auto-trigger description so review-style Japanese requests reliably invoke the skill instead of being answered in prose.
