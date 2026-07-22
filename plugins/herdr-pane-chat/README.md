@@ -7,12 +7,12 @@ Unlike the tmux-based sibling ([`tmux-codex-chat`](../tmux-codex-chat/)), this s
 ## How it works
 
 1. Guard: the skill only runs inside a herdr session (`HERDR_ENV=1`).
-2. Discover: `herdr agent list` is filtered to the **current workspace** (`$HERDR_WORKSPACE_ID`); the invoking pane (`$HERDR_PANE_ID`) is excluded. One candidate → used directly; multiple or zero → the user is asked. The skill never starts an agent on its own.
-3. Send: `herdr agent send` writes the prompt into the target's composer, then `herdr pane send-keys <pane> enter` submits. Long or multi-line prompts are written to a private file (`/tmp/herdr-pane-chat-$UID/`, mode 700) and referenced instead.
-4. Wait: the skill polls `herdr agent get` until the status becomes `done`/`idle` (answered) or `blocked` (approval dialog — surfaced to the user; the skill never presses keys on the target's dialogs). Default deadline is 5 minutes.
-5. Read: `herdr agent read --source recent-unwrapped` returns clean, unwrapped scrollback; the answer is extracted and reported.
+2. Discover: `herdr agent list` is filtered to the **current workspace** (`$HERDR_WORKSPACE_ID`); the invoking pane (`$HERDR_PANE_ID`) is excluded. One candidate → used directly; multiple → the user is asked; zero → reported and stopped. The skill never starts an agent on its own.
+3. Send: `herdr agent send` writes the prompt into the target's composer, then `herdr pane send-keys <pane> enter` submits (with a status re-check immediately before the keystroke). Anything long, multi-line, or containing code/quotes is written — without passing through the shell — to a fresh private `mktemp -d` directory (mode 700) and referenced by path instead.
+4. Wait: the skill first confirms the `working` transition (correlating completion with *this* request), then polls `herdr agent get` until the status becomes `done`/`idle` (answered) or `blocked` (approval dialog — surfaced to the user; the skill never knowingly presses keys on the target's dialogs, best-effort since no atomic submit API exists). Unknown statuses and CLI failures fail closed. Default deadline is 5 minutes.
+5. Read: `herdr agent read --source recent-unwrapped` returns clean, unwrapped scrollback; the answer is extracted after an explicit request boundary (the unique per-run prompt-file path) and reported.
 
-One invocation = one prompt → one answer. Follow-up questions are new invocations. There is no per-request state, so timeouts and interrupted runs can always be resumed safely.
+One invocation = one prompt → one answer. Follow-up questions are new invocations. Timeouts and interrupted runs resume by re-entering the wait loop only — the prompt is never re-sent.
 
 ## Prerequisites
 
@@ -58,7 +58,7 @@ The target agent paused on an approval dialog. Resolve it in that pane yourself 
 
 ### Timeout on long tasks
 
-The default deadline is 5 minutes. For heavy reviews, ask again with a longer budget (e.g. "wait up to 15 minutes") — resuming is always safe because herdr keeps no per-request state.
+The default deadline is 5 minutes. For heavy reviews, ask again with a longer budget (e.g. "wait up to 15 minutes") — resuming is safe because it only re-enters the wait loop; the prompt is never re-sent.
 
 ## Manual install (no plugin system)
 
