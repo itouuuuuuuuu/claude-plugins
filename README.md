@@ -17,6 +17,7 @@ Then restart Claude Code or run `/reload-plugins`.
 
 | Plugin | Description | Docs |
 |---|---|---|
+| [`herdr-pane-chat`](plugins/herdr-pane-chat/) | Chat with an AI agent (Claude Code, Codex, ...) in another [herdr](https://herdr.dev) pane via herdr's native agent-status tracking (no hooks, no polling). | [README](plugins/herdr-pane-chat/README.md) |
 | [`tmux-codex-chat`](plugins/tmux-codex-chat/) | Send a prompt to OpenAI Codex CLI in another tmux pane and capture the answer via Codex's `Stop` hook (no UI polling). | [README](plugins/tmux-codex-chat/README.md) |
 
 ## Repository layout

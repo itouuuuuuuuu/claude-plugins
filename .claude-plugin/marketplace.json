@@ -7,9 +7,23 @@
   },
   "metadata": {
     "description": "Claude Code plugins by Masafumi Ito — integrations and workflows.",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
+    {
+      "name": "herdr-pane-chat",
+      "description": "Chat with an AI agent (Claude Code, Codex, ...) running in another herdr pane — send a prompt, wait via herdr's native agent-status tracking, and capture the answer.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Masafumi Ito",
+        "email": "ito.masafumi@classmethod.jp"
+      },
+      "homepage": "https://github.com/itouuuuuuuuu/claude-plugins/tree/main/plugins/herdr-pane-chat",
+      "license": "MIT",
+      "keywords": ["herdr", "codex", "claude", "pane"],
+      "category": "productivity",
+      "source": "./plugins/herdr-pane-chat"
+    },
     {
       "name": "tmux-codex-chat",
       "description": "Send a prompt to OpenAI Codex CLI in another tmux pane and capture the answer via Codex's Stop hook (no UI polling).",

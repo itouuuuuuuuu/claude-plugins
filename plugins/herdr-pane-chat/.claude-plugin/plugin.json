@@ -1,0 +1,13 @@
+{
+  "name": "herdr-pane-chat",
+  "version": "1.0.0",
+  "description": "Chat with an AI agent (Claude Code, Codex, ...) running in another herdr pane — send a prompt, wait via herdr's native agent-status tracking, and capture the answer.",
+  "author": {
+    "name": "Masafumi Ito",
+    "email": "ito.masafumi@classmethod.jp",
+    "url": "https://github.com/itouuuuuuuuu"
+  },
+  "homepage": "https://github.com/itouuuuuuuuu/claude-plugins/tree/main/plugins/herdr-pane-chat",
+  "license": "MIT",
+  "keywords": ["herdr", "codex", "claude", "pane", "skill"]
+}
