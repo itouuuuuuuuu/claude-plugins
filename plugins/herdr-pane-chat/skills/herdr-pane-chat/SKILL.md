@@ -16,7 +16,7 @@ herdr tracks per-pane agent identity and status natively (`idle` / `working` / `
 
 ## Verified behavior (herdr 0.8.0, 2026-08)
 
-- **Every `herdr` CLI command exits 0, including on failure.** Errors come back on stdout as `{"error":{"code":…,"message":…}}`. Never branch on `$?` — always inspect the JSON for `.error`.
+- Success goes to **stdout** with exit 0. Failure goes to **stderr** with a non-zero exit: `1` for an API error (`agent_not_found`, `timeout`, …), carrying `{"error":{"code":…,"message":…}}`; `2` for an unknown subcommand or option, carrying a plain-text usage block or `unknown option: …`. Capture `2>&1` and check both the exit code and the payload — a call that only reads stdout sees nothing at all on failure.
 - `agent list` / `agent get` / `agent prompt` / `agent wait` return JSON. **`agent read` returns plain text, not JSON** — do not pipe it through `jq`.
 - `herdr agent prompt <target> <text>` writes the text into the composer **and submits it**. There is no separate submit step.
 - `--wait` blocks until the agent reaches a settled state and returns the agent object; the settled state is `.result.agent.agent_status`. Default matches are `idle`, `done`, and `blocked`. `--until <STATUS>` (repeatable) narrows it.
@@ -31,11 +31,11 @@ herdr tracks per-pane agent identity and status natively (`idle` / `working` / `
 | Pre-0.8.0 | 0.8.0 |
 | --- | --- |
 | `herdr agent send <target> <text>` (wrote without submitting) | `herdr agent prompt <target> <text>` (writes **and** submits) |
-| `herdr pane send-keys <pane> enter` | no `pane send-keys` subcommand; raw keys go through `herdr agent send-keys <target> <key>` |
+| `herdr pane send-keys <pane> enter` as the submit step | no longer needed — `agent prompt` submits. `pane send-keys` and `agent send-keys` both still exist for raw keys |
 | `herdr agent wait --status idle` | `herdr agent wait --until idle` |
 | `herdr agent read … \| jq -r '.result.read.text'` | `herdr agent read …` prints the text directly |
 
-The removed commands print their usage block and still exit 0, so a stale call looks like it worked. This is the failure mode that motivated the rewrite.
+`agent send` is gone outright and `agent wait --status` is rejected as an unknown option; both fail with exit 2 and a usage block on stderr. A caller that pipes into `jq` without redirecting stderr sees an empty stdout and a jq parse error rather than the actual message, which is how the 1.0.0 flow failed obscurely.
 
 ## Workflow
 
@@ -52,14 +52,17 @@ If the guard fails, tell the user this skill only works inside herdr and stop.
 ### 1. Discover the target agent
 
 ```bash
-herdr agent list | jq -r --arg ws "$WS" --arg self "$SELF_PANE" '
-  if .error then "ERROR:\(.error.code):\(.error.message)"
-  else .result.agents[]
-    | select(.workspace_id == $ws and .pane_id != $self)
-    | [.pane_id, .agent, .agent_status, .cwd, .terminal_title_stripped]
-    | @tsv
-  end'
+AGENTS=$(herdr agent list 2>&1) || { echo "$AGENTS"; exit 1; }
+case "$AGENTS" in *'"error"'*) echo "$AGENTS"; exit 1 ;; esac
+
+printf '%s' "$AGENTS" | jq -r --arg ws "$WS" --arg self "$SELF_PANE" '
+  .result.agents[]
+  | select(.workspace_id == $ws and .pane_id != $self)
+  | [.pane_id, .agent, .agent_status, .cwd, .terminal_title_stripped]
+  | @tsv'
 ```
+
+**Check the call before reading its output.** A failed `agent list` writes to stderr and leaves stdout empty, so piping it straight into `jq` produces no rows — indistinguishable from a genuine "no agents here". Reporting *"no matching agent exists"* when the socket call actually failed sends the user hunting for the wrong problem. Empty output counts as zero candidates **only after** the call is known to have succeeded.
 
 Keep only rows whose agent label matches what the user asked for (`codex`, `claude`, …). If the user said something generic like "the agent in the other pane", every row is a candidate.
 
@@ -71,14 +74,48 @@ Decision rule — **never guess**:
 
 ### 2. Pre-send readiness check
 
+Calls that answer with an agent object — `agent get`, `agent prompt --wait`, `agent wait` — go through one helper that reduces the response (success, API error, or usage block) to a single string. Define it once per Bash invocation; each tool call starts a fresh shell, so it does not carry over:
+
 ```bash
-STATUS=$(herdr agent get "$TARGET" | jq -r 'if .error then "error" else .result.agent.agent_status end')
+hq() {                                   # hq herdr agent get "$TARGET"
+  local out rc
+  out=$("$@" 2>&1); rc=$?                # errors land on stderr, so capture it
+  case "$out" in
+    '{'*) printf '%s' "$out" | jq -r 'if .error then "ERROR:\(.error.code):\(.error.message)"
+                                      else "STATUS:\(.result.agent.agent_status)" end' ;;
+    *)    printf 'ERROR:exit%s:%s\n' "$rc" "${out%%$'\n'*}" ;;   # usage block, unknown option
+  esac
+}
+
+READY=$(hq herdr agent get "$TARGET")
 ```
 
-- `idle` / `done` → proceed.
-- `working` → wait: `herdr agent wait "$TARGET" --until idle --until done --timeout 60000`. If that returns a timeout error, show the user the current status plus the tail of `herdr agent read "$TARGET" --source visible --lines 20` and ask whether to keep waiting or abort. Do not interrupt the target.
-- `blocked` → the pane is paused on an approval dialog. Surface the visible pane content and ask the user to resolve it in that pane. Never act on its behalf.
-- **Anything else** (`unknown`, empty string, `.error` present) → fail closed: send nothing, surface the raw `herdr agent get` output, stop.
+The `case` arm matters: a removed subcommand answers with a usage block, not JSON, and piping that straight into `jq` yields a parse error instead of the reason.
+
+Calls that do **not** answer with an agent object — `agent send-keys` in the stall recovery — need their own check, since there is no `agent_status` to read:
+
+```bash
+hrun() {                                 # hrun herdr agent send-keys "$TARGET" enter
+  local out rc
+  out=$("$@" 2>&1); rc=$?
+  if [ "$rc" -ne 0 ]; then printf 'ERROR:exit%s:%s\n' "$rc" "${out%%$'\n'*}"
+  elif [ "${out#*'"error"'}" != "$out" ]; then printf 'ERROR:%s\n' "${out%%$'\n'*}"
+  else printf 'OK\n'; fi
+}
+```
+
+`agent list` (§1) is the third shape — its payload is a list, not a status — and is checked inline there.
+
+- `STATUS:idle` / `STATUS:done` → proceed to §3.
+- `STATUS:working` → wait, and **check the wait's own result the same way**:
+
+  ```bash
+  READY=$(hq herdr agent wait "$TARGET" --until idle --until done --timeout 60000)
+  ```
+
+  Only `STATUS:idle` / `STATUS:done` may proceed. On `ERROR:timeout:…` show the user the current status plus the tail of `herdr agent read "$TARGET" --source visible --lines 20` and ask whether to keep waiting or abort. On any other `ERROR:` fail closed. Do not interrupt the target.
+- `STATUS:blocked` → the pane is paused on an approval dialog. Surface the visible pane content and ask the user to resolve it in that pane. Never act on its behalf.
+- **Anything else** (`STATUS:unknown`, empty string, any `ERROR:`) → fail closed: send nothing, surface the raw response, stop.
 
 **Do not skip this step.** `agent prompt --wait` does not correlate its wait with your submission, so prompting an agent that is already `working` can return the instant its *previous* turn ends — and you would then read someone else's answer as if it were yours.
 
@@ -97,18 +134,24 @@ Two send paths:
 
 Allowed only when the prompt is a single line, ≤200 chars, and contains **none** of `'`, `"`, `` ` ``, `$`, `\` (so it can be single-quoted into the Bash call verbatim). Anything else — and any prompt where you may later need to correlate the answer (busy pane, likely resume) — goes through 3b.
 
+```bash
+RESPONSE=$(hq herdr agent prompt "$TARGET" '<single-line prompt text>' --wait --timeout 900000)
+```
+
 #### 3b. File reference (default for anything long, multi-line, or containing code/quotes)
 
 Write the prompt body to `$PROMPT_FILE` **with the Write tool, not a shell heredoc** — the body must never pass through shell parsing, so no quoting/heredoc-terminator collision is possible and the body truly may contain any characters.
 
 The `$RUNDIR` path is unique per run, which makes the reference line a natural request boundary in the scrollback (see §5).
 
-#### Submit and wait
-
 ```bash
-RESPONSE=$(herdr agent prompt "$TARGET" "Please read $PROMPT_FILE and respond to the request inside it." \
+RESPONSE=$(hq herdr agent prompt "$TARGET" "Please read $PROMPT_FILE and respond to the request inside it." \
   --wait --timeout 900000)
 ```
+
+#### Deadline and hard rules
+
+Both paths produce `$RESPONSE`, which §4 interprets.
 
 Deadline: 300000 (5 min) by default; 600000–900000 (10–15 min) when the request is explicitly heavy — multi-file review, deep audit. Never omit `--timeout`; without it the wait is indefinite.
 
@@ -116,10 +159,7 @@ Deadline: 300000 (5 min) by default; 600000–900000 (10–15 min) when the requ
 
 ### 4. Interpret the result
 
-```bash
-echo "$RESPONSE" | jq -r 'if .error then "ERROR:\(.error.code):\(.error.message)"
-                          else "STATUS:\(.result.agent.agent_status)" end'
-```
+`$RESPONSE` already holds a `STATUS:…` or `ERROR:…` string — `hq` did the reduction.
 
 | Result | Meaning | Action |
 | --- | --- | --- |
@@ -132,14 +172,23 @@ echo "$RESPONSE" | jq -r 'if .error then "ERROR:\(.error.code):\(.error.message)
 **Resume path — never re-run §3.** Re-prompting duplicates the request. Resume waits only:
 
 ```bash
-herdr agent wait "$TARGET" --until idle --until done --until blocked --timeout 900000
+RESPONSE=$(hq herdr agent wait "$TARGET" --until idle --until done --until blocked --timeout 900000)
 ```
 
-Then go to §5. Keep `$RUNDIR` and `$PROMPT_FILE` until the answer is captured, so the §5 boundary still works.
+`agent wait` returns the same JSON shape as `agent prompt --wait`, so **feed `$RESPONSE` back through the §4 table** — it can time out again, come back `blocked`, or carry an `.error`. Only `STATUS:done` / `STATUS:idle` may proceed to §5; anything else loops back here or stops. Never read the scrollback on an unresolved status: the turn is still in flight and the output is partial.
+
+Keep `$RUNDIR` and `$PROMPT_FILE` until the answer is captured, so the §5 boundary still works.
 
 **On `agent_prompt_stalled`**, read the visible pane (`herdr agent read "$TARGET" --source visible`):
 
-- The prompt is sitting unsubmitted on the composer (`›`) line → re-check that the status is still `idle`/`done`, send one `herdr agent send-keys "$TARGET" enter`, then resume with `agent wait`.
+- The prompt is sitting unsubmitted on the composer (`›`) line → re-check that the status is still `idle`/`done`, then send exactly one Enter and **verify it landed** before waiting on it:
+
+  ```bash
+  [ "$(hrun herdr agent send-keys "$TARGET" enter)" = OK ] || { echo "keystroke failed"; exit 1; }
+  RESPONSE=$(hq herdr agent wait "$TARGET" --until idle --until done --until blocked --timeout 900000)
+  ```
+
+  Without that check a rejected keystroke is followed by a wait on an agent that was never prompted, which then times out — or worse, settles on unrelated activity — and the failure is reported as the target being slow. Interpret `$RESPONSE` through the §4 table as usual.
 - The pane shows the prompt already submitted with output below it → the turn completed faster than the state machine observed; go to §5 (the boundary check still applies).
 - Anything else → stop, surface the pane content, report. Do not keep hammering.
 
@@ -185,4 +234,11 @@ Shell aliases are a live hazard here in general: user shells alias short names t
 
 Targets accept pane ids (`w4:pP`), terminal ids, and unique agent labels — prefer the pane id resolved in §1.
 
-Every one of these exits 0 on failure. Check the JSON for `.error` before trusting a result.
+All of these report failure on **stderr** with a non-zero exit, so none of them is ever called bare or piped straight into `jq`:
+
+| Response shape | Checked by |
+| --- | --- |
+| agent object (`get`, `prompt --wait`, `wait`) | `hq` (§2) |
+| acknowledgement (`send-keys`) | `hrun` (§2) |
+| list payload (`list`) | inline exit + `"error"` check (§1) |
+| plain text (`read`) | read directly — not JSON, no `jq` |

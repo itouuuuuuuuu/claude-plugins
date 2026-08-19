@@ -7,10 +7,12 @@ Rewritten against the herdr 0.8.0 CLI. The 1.0.0 instructions were verified agai
 - `herdr agent send` + `herdr pane send-keys <pane> enter` replaced by `herdr agent prompt <target> <text> --wait --timeout <ms>`, which writes, submits, and waits for a settled state in one call. The guarded-Enter pattern and the manual poll loop are gone, and with them the composer/Enter race the old flow could only mitigate best-effort.
 - `herdr agent wait --status` renamed to `--until` (repeatable).
 - `herdr agent read` now returns plain text; the old `jq -r '.result.read.text'` extraction produced a parse error.
-- Documented that **every herdr CLI command exits 0 even on failure**, returning `{"error":{...}}` on stdout. Results are now checked for `.error` instead of an exit code — the removed 0.7.x commands print their usage block and still exit 0, so a stale call looks like it succeeded.
+- Documented herdr's error contract and gave every response shape an explicit check — `hq` for agent objects (`get` / `prompt --wait` / `wait`), `hrun` for acknowledgements (`send-keys`), an inline check for `agent list`, and plain-text reads for `agent read`. Failures go to **stderr** with a non-zero exit (`1` for API errors carrying `{"error":{...}}`, `2` for a removed subcommand or unknown option carrying a usage block). Piping a herdr call straight into `jq` without redirecting stderr shows an empty stdout and a parse error instead of the actual reason — the obscure way the 1.0.0 flow broke on 0.8.0.
 - The pre-send readiness check is now mandatory rather than an optimization: `--wait` does not track turns, so prompting an already-`working` agent can settle on its previous turn and return the wrong answer.
 - Resume after `blocked` / `timeout` / `agent_prompt_stalled` uses `herdr agent wait`; the prompt is still never re-sent.
 - Added a note that user shells alias short command names to unrelated tools (`tr` → `eza` observed in the wild), so builtins, parameter expansion, or absolute paths are preferred.
+- A failed `agent list` used to be indistinguishable from an empty one: stderr carried the reason, stdout was empty, and the `jq` filter produced no rows — reported to the user as "no matching agent in this workspace". The call is now checked before its output is read.
+- Stall recovery verifies its `send-keys` landed before waiting on the result, instead of waiting on an agent that was never prompted and reporting the timeout as target slowness.
 - Requires herdr 0.8.0 or newer.
 
 ## [1.0.0] — 2026-07-22
