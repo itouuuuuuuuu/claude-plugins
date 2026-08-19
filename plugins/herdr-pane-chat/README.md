@@ -8,15 +8,17 @@ Unlike the tmux-based sibling ([`tmux-codex-chat`](../tmux-codex-chat/)), this s
 
 1. Guard: the skill only runs inside a herdr session (`HERDR_ENV=1`).
 2. Discover: `herdr agent list` is filtered to the **current workspace** (`$HERDR_WORKSPACE_ID`); the invoking pane (`$HERDR_PANE_ID`) is excluded. One candidate → used directly; multiple → the user is asked; zero → reported and stopped. The skill never starts an agent on its own.
-3. Send: `herdr agent send` writes the prompt into the target's composer, then `herdr pane send-keys <pane> enter` submits (with a status re-check immediately before the keystroke). Anything long, multi-line, or containing code/quotes is written — without passing through the shell — to a fresh private `mktemp -d` directory (mode 700) and referenced by path instead.
-4. Wait: the skill first confirms the `working` transition (correlating completion with *this* request), then polls `herdr agent get` until the status becomes `done`/`idle` (answered) or `blocked` (approval dialog — surfaced to the user; the skill never knowingly presses keys on the target's dialogs, best-effort since no atomic submit API exists). Unknown statuses and CLI failures fail closed. Default deadline is 5 minutes.
+3. Send: `herdr agent prompt --wait --timeout <ms>` writes the prompt into the target's composer, submits it, and blocks until the agent settles — one call, no keystroke, no composer race. Anything long, multi-line, or containing code/quotes is written — without passing through the shell — to a fresh private `mktemp -d` directory (mode 700) and referenced by path instead.
+4. Wait: the settled status comes back in the same response — `done`/`idle` (answered) or `blocked` (approval dialog, surfaced to the user; the skill never presses keys there). A readiness check before sending keeps the wait correlated with *this* request, because `--wait` does not track turns. herdr reports failure on stderr with a non-zero exit (1 for API errors carrying `{"error":...}`, 2 for a removed subcommand's usage block), so every call captures stderr and is reduced through one helper; anything unexpected fails closed. Default deadline is 5 minutes.
 5. Read: `herdr agent read --source recent-unwrapped` returns clean, unwrapped scrollback; the answer is extracted after an explicit request boundary (the unique per-run prompt-file path) and reported.
 
-One invocation = one prompt → one answer. Follow-up questions are new invocations. Timeouts and interrupted runs resume by re-entering the wait loop only — the prompt is never re-sent.
+One invocation = one prompt → one answer. Follow-up questions are new invocations. Timeouts and interrupted runs resume with `herdr agent wait` only — the prompt is never re-sent.
+
+> **herdr 0.8.0 or newer.** `agent send` was removed and `agent wait --status` became `--until`; a removed subcommand prints its usage block and still exits 0, so an older skill fails silently.
 
 ## Prerequisites
 
-- [herdr](https://herdr.dev) — the session must run inside it
+- [herdr](https://herdr.dev) **0.8.0 or newer** — the session must run inside it
 - [Claude Code](https://www.claude.com/product/claude-code) CLI
 - `jq` on `PATH`
 - A target agent already running in another pane of the same workspace

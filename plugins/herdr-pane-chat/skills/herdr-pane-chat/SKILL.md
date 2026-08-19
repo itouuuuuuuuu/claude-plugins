@@ -1,24 +1,41 @@
 ---
 name: herdr-pane-chat
-description: Send one prompt to an AI coding agent (Claude Code, Codex, or any agent herdr detects) running in another herdr pane, wait for its answer via herdr's native agent-status tracking, and report the answer back. MUST auto-trigger (invoke the Skill tool immediately — do NOT only describe) whenever the session is inside herdr (HERDR_ENV=1) and the user wants to consult another agent or have it review/check anything in a separate pane. Hard trigger: any sentence naming an agent (codex, claude, 別の claude, 隣の pane の…) together with レビュー / 確認 / チェック / 見て / 意見 / 聞いて or English review / check / audit / consult / ask — fire even when no pane is specified; the skill discovers candidates itself. Japanese examples:「codex に確認して」「別のペインの claude に確認して」「codex にレビューしてもらって」「隣の claude に聞いて」「codex の意見が欲しい」. English examples: "ask codex", "consult the other claude", "have codex review this". Candidates come from `herdr agent list`, restricted to the current workspace ($HERDR_WORKSPACE_ID); the invoking pane ($HERDR_PANE_ID) is always excluded. Exactly one candidate → use it; multiple → ask the user; zero → report and stop (the skill never auto-starts an agent). No hooks, no markers, no UI polling — completion is detected by the agent status transitioning working → done/idle.
+description: Send one prompt to an AI coding agent (Claude Code, Codex, or any agent herdr detects) running in another herdr pane, wait for its answer via herdr's native agent-status tracking, and report the answer back. MUST auto-trigger (invoke the Skill tool immediately — do NOT only describe) whenever the session is inside herdr (HERDR_ENV=1) and the user wants to consult another agent or have it review/check anything in a separate pane. Hard trigger: any sentence naming an agent (codex, claude, 別の claude, 隣の pane の…) together with レビュー / 確認 / チェック / 見て / 意見 / 聞いて or English review / check / audit / consult / ask — fire even when no pane is specified; the skill discovers candidates itself. Japanese examples:「codex に確認して」「別のペインの claude に確認して」「codex にレビューしてもらって」「隣の claude に聞いて」「codex の意見が欲しい」. English examples: "ask codex", "consult the other claude", "have codex review this". Candidates come from `herdr agent list`, restricted to the current workspace ($HERDR_WORKSPACE_ID); the invoking pane ($HERDR_PANE_ID) is always excluded. Exactly one candidate → use it; multiple → ask the user; zero → report and stop (the skill never auto-starts an agent). No hooks, no markers, no UI polling — submission and completion are handled by `herdr agent prompt --wait`.
 allowed-tools: Bash, Write
 ---
 
 # herdr-pane-chat
 
-One invocation = one prompt → one captured answer. Follow-ups require re-invocation (the target pane is already known then, so repeat rounds are fast). The skill never *knowingly* presses keys on the target agent's approval dialogs: the status is re-checked immediately before every `enter` keystroke and the submit is aborted if the target is not `idle`/`done`. This is **best-effort** — herdr has no atomic "submit only if still idle" API, so a small race window between the check and the keystroke is unavoidable. If the target becomes `blocked`, the dialog is surfaced to the user instead.
+One invocation = one prompt → one captured answer. Follow-ups require re-invocation (the target pane is already known then, so repeat rounds are fast). The skill never presses keys on the target agent's approval dialogs: the normal path submits through `herdr agent prompt`, which needs no keystroke at all. If the target ends up `blocked`, the dialog is surfaced to the user instead.
 
 ## Why this is simpler than the tmux-based variants
 
-herdr tracks per-pane agent identity and status natively (`idle` / `working` / `blocked` / `done` / `unknown`), so there is no Stop hook, no UUID marker, no pending file, and no UI-string polling. Everything runs over the `herdr agent ...` / `herdr pane ...` CLI (socket API), which returns JSON.
+herdr tracks per-pane agent identity and status natively (`idle` / `working` / `blocked` / `done` / `unknown`), so there is no Stop hook, no UUID marker, no pending file, and no UI-string polling. Everything runs over the `herdr agent ...` CLI (socket API).
 
-Verified behavior (herdr 0.7.4, 2026-07):
+`herdr agent prompt --wait` submits **and** waits for a settled state in a single call, so there is no composer/Enter race to guard and no poll loop to write.
 
-- `herdr agent send <target> <text>` writes literal text into the composer; it does **not** submit.
-- `herdr pane send-keys <pane_id> enter` submits (the key name is lowercase `enter`).
-- After submission the status flips to `working` within ~1 s.
-- On completion the status becomes `done` (it may later settle back to `idle`). `herdr agent wait <target> --status idle` also resolves on `done`.
-- `herdr agent read <target> --source recent-unwrapped` returns unwrapped scrollback in the JSON field `.result.read.text` — no line-wrapping artifacts.
+## Verified behavior (herdr 0.8.0, 2026-08)
+
+- Success goes to **stdout** with exit 0. Failure goes to **stderr** with a non-zero exit: `1` for an API error (`agent_not_found`, `timeout`, …), carrying `{"error":{"code":…,"message":…}}`; `2` for an unknown subcommand or option, carrying a plain-text usage block or `unknown option: …`. Capture `2>&1` and check both the exit code and the payload — a call that only reads stdout sees nothing at all on failure.
+- `agent list` / `agent get` / `agent prompt` / `agent wait` return JSON. **`agent read` returns plain text, not JSON** — do not pipe it through `jq`.
+- `herdr agent prompt <target> <text>` writes the text into the composer **and submits it**. There is no separate submit step.
+- `--wait` blocks until the agent reaches a settled state and returns the agent object; the settled state is `.result.agent.agent_status`. Default matches are `idle`, `done`, and `blocked`. `--until <STATUS>` (repeatable) narrows it.
+- Starting from a non-working state, `--wait` first requires an observed state change within 5000 ms, otherwise it returns `agent_prompt_stalled`. A `--timeout` shorter than that returns `timeout` instead. Without `--timeout` the settled-state wait is **indefinite** — always pass one.
+- `--wait` **does not track turns**: if the agent was already `working`, that in-flight turn's completion can satisfy the wait. This is why the readiness check in §2 is mandatory, not an optimization.
+- `herdr agent wait <target> --until <STATUS> --timeout <MS>` waits **without sending anything**. This is the resume path.
+- On completion the status is `done`; it may later settle back to `idle`.
+- `agent read --source recent-unwrapped` returns unwrapped scrollback — no line-wrapping artifacts.
+
+### Removed or renamed in 0.8.0
+
+| Pre-0.8.0 | 0.8.0 |
+| --- | --- |
+| `herdr agent send <target> <text>` (wrote without submitting) | `herdr agent prompt <target> <text>` (writes **and** submits) |
+| `herdr pane send-keys <pane> enter` as the submit step | no longer needed — `agent prompt` submits. `pane send-keys` and `agent send-keys` both still exist for raw keys |
+| `herdr agent wait --status idle` | `herdr agent wait --until idle` |
+| `herdr agent read … \| jq -r '.result.read.text'` | `herdr agent read …` prints the text directly |
+
+`agent send` is gone outright and `agent wait --status` is rejected as an unknown option; both fail with exit 2 and a usage block on stderr. A caller that pipes into `jq` without redirecting stderr sees an empty stdout and a jq parse error rather than the actual message, which is how the 1.0.0 flow failed obscurely.
 
 ## Workflow
 
@@ -35,12 +52,17 @@ If the guard fails, tell the user this skill only works inside herdr and stop.
 ### 1. Discover the target agent
 
 ```bash
-herdr agent list | jq -r --arg ws "$WS" --arg self "$SELF_PANE" '
+AGENTS=$(herdr agent list 2>&1) || { echo "$AGENTS"; exit 1; }
+case "$AGENTS" in *'"error"'*) echo "$AGENTS"; exit 1 ;; esac
+
+printf '%s' "$AGENTS" | jq -r --arg ws "$WS" --arg self "$SELF_PANE" '
   .result.agents[]
   | select(.workspace_id == $ws and .pane_id != $self)
   | [.pane_id, .agent, .agent_status, .cwd, .terminal_title_stripped]
   | @tsv'
 ```
+
+**Check the call before reading its output.** A failed `agent list` writes to stderr and leaves stdout empty, so piping it straight into `jq` produces no rows — indistinguishable from a genuine "no agents here". Reporting *"no matching agent exists"* when the socket call actually failed sends the user hunting for the wrong problem. Empty output counts as zero candidates **only after** the call is known to have succeeded.
 
 Keep only rows whose agent label matches what the user asked for (`codex`, `claude`, …). If the user said something generic like "the agent in the other pane", every row is a candidate.
 
@@ -52,14 +74,52 @@ Decision rule — **never guess**:
 
 ### 2. Pre-send readiness check
 
+Calls that answer with an agent object — `agent get`, `agent prompt --wait`, `agent wait` — go through one helper that reduces the response (success, API error, or usage block) to a single string. Define it once per Bash invocation; each tool call starts a fresh shell, so it does not carry over:
+
 ```bash
-STATUS=$(herdr agent get "$TARGET" | jq -r '.result.agent.agent_status')
+hq() {                                   # hq herdr agent get "$TARGET"
+  local out rc
+  out=$("$@" 2>&1); rc=$?                # errors land on stderr, so capture it
+  case "$out" in
+    '{'*) printf '%s' "$out" | jq -r 'if .error then "ERROR:\(.error.code):\(.error.message)"
+                                      else "STATUS:\(.result.agent.agent_status)" end' ;;
+    *)    printf 'ERROR:exit%s:%s\n' "$rc" "${out%%$'\n'*}" ;;   # usage block, unknown option
+  esac
+}
+
+READY=$(hq herdr agent get "$TARGET")
 ```
 
-- `idle` / `done` → proceed.
-- `working` → wait briefly: `herdr agent wait "$TARGET" --status idle --timeout 60000`. If that times out, show the user the current status plus the tail of `herdr agent read "$TARGET" --source visible --lines 20` and ask whether to keep waiting or abort. Do not interrupt the target.
-- `blocked` → the pane is paused on an approval dialog. Surface the visible pane content and ask the user to resolve it in that pane. Never press keys on its behalf.
-- **Anything else** (`unknown`, empty string, jq/CLI failure) → fail closed: do not send anything; surface the raw `herdr agent get` output to the user and stop.
+The `case` arm matters: a removed subcommand answers with a usage block, not JSON, and piping that straight into `jq` yields a parse error instead of the reason.
+
+Calls that do **not** answer with an agent object — `agent send-keys` in the stall recovery — need their own check, since there is no `agent_status` to read:
+
+```bash
+hrun() {                                 # hrun herdr agent send-keys "$TARGET" enter
+  local out rc
+  out=$("$@" 2>&1); rc=$?
+  if [ "$rc" -ne 0 ]; then printf 'ERROR:exit%s:%s\n' "$rc" "${out%%$'\n'*}"
+  elif [ "${out#*'"error"'}" != "$out" ]; then printf 'ERROR:%s\n' "${out%%$'\n'*}"
+  else printf 'OK\n'; fi
+}
+```
+
+`agent list` (§1) is the third shape — its payload is a list, not a status — and is checked inline there.
+
+- `STATUS:idle` / `STATUS:done` → proceed to §3.
+- `STATUS:working` → wait out the current turn, checking the wait's own result the same way (below).
+- `STATUS:blocked` → the pane is paused on an approval dialog. Surface the visible pane content and ask the user to resolve it in that pane. Never act on its behalf.
+- **Anything else** (`STATUS:unknown`, empty string, any `ERROR:`) → fail closed: send nothing, surface the raw response, stop.
+
+Waiting out a `working` target:
+
+```bash
+READY=$(hq herdr agent wait "$TARGET" --until idle --until done --timeout 60000)
+```
+
+Only `STATUS:idle` / `STATUS:done` may proceed from here. On `ERROR:timeout:…` show the user the current status plus the tail of `herdr agent read "$TARGET" --source visible --lines 20` and ask whether to keep waiting or abort. On any other `ERROR:` fail closed. Do not interrupt the target.
+
+**Do not skip this step.** `agent prompt --wait` does not correlate its wait with your submission, so prompting an agent that is already `working` can return the instant its *previous* turn ends — and you would then read someone else's answer as if it were yours.
 
 ### 3. Send the prompt
 
@@ -77,101 +137,83 @@ Two send paths:
 Allowed only when the prompt is a single line, ≤200 chars, and contains **none** of `'`, `"`, `` ` ``, `$`, `\` (so it can be single-quoted into the Bash call verbatim). Anything else — and any prompt where you may later need to correlate the answer (busy pane, likely resume) — goes through 3b.
 
 ```bash
-herdr agent send "$TARGET" '<single-line prompt text>'
+RESPONSE=$(hq herdr agent prompt "$TARGET" '<single-line prompt text>' --wait --timeout 900000)
 ```
 
 #### 3b. File reference (default for anything long, multi-line, or containing code/quotes)
 
-Write the prompt body to `$PROMPT_FILE` **with the Write tool, not a shell heredoc** — the body must never pass through shell parsing, so no quoting/heredoc-terminator collision is possible and the body truly may contain any characters. Then:
+Write the prompt body to `$PROMPT_FILE` **with the Write tool, not a shell heredoc** — the body must never pass through shell parsing, so no quoting/heredoc-terminator collision is possible and the body truly may contain any characters.
+
+The `$RUNDIR` path is unique per run, which makes the reference line a natural request boundary in the scrollback (see §5).
 
 ```bash
-herdr agent send "$TARGET" "Please read $PROMPT_FILE and respond to the request inside it."
+RESPONSE=$(hq herdr agent prompt "$TARGET" "Please read $PROMPT_FILE and respond to the request inside it." \
+  --wait --timeout 900000)
 ```
 
-The `$RUNDIR` path is unique per run, which also makes this line a natural request boundary in the scrollback (see §6).
+#### Deadline and hard rules
 
-#### Submit — guarded Enter
+Both paths produce `$RESPONSE`, which §4 interprets.
 
-`agent send` never submits; the composer does not change the agent status. Re-check the status immediately before the keystroke and abort unless it is still `idle`/`done`:
+Deadline: 300000 (5 min) by default; 600000–900000 (10–15 min) when the request is explicitly heavy — multi-file review, deep audit. Never omit `--timeout`; without it the wait is indefinite.
+
+**Hard rule: never embed a literal newline in the prompt text.** TUI composers may submit on newline, splitting one prompt into several partial messages. That is exactly what the file-reference path exists for.
+
+### 4. Interpret the result
+
+`$RESPONSE` already holds a `STATUS:…` or `ERROR:…` string — `hq` did the reduction.
+
+| Result | Meaning | Action |
+| --- | --- | --- |
+| `STATUS:done` / `STATUS:idle` | the agent finished its turn | go to §5 |
+| `STATUS:blocked` | approval dialog | surface the visible pane, the user resolves it in that pane, then **resume** |
+| `ERROR:agent_prompt_stalled:…` | the submission never moved the agent | see below |
+| `ERROR:timeout:…` | still working at the deadline | show the tail of the pane, report, offer to **resume** with a longer wait |
+| any other `ERROR:` | fail closed | surface the raw JSON and stop |
+
+**Resume path — never re-run §3.** Re-prompting duplicates the request. Resume waits only:
 
 ```bash
-STATUS=$(herdr agent get "$TARGET" | jq -r '.result.agent.agent_status')
-case "$STATUS" in
-  idle|done) herdr pane send-keys "$TARGET" enter ;;
-  *) echo "abort: target status changed to '$STATUS' before submit"; exit 1 ;;
-esac
+RESPONSE=$(hq herdr agent wait "$TARGET" --until idle --until done --until blocked --timeout 900000)
 ```
 
-Hard rules:
+`agent wait` returns the same JSON shape as `agent prompt --wait`, so **feed `$RESPONSE` back through the §4 table** — it can time out again, come back `blocked`, or carry an `.error`. Only `STATUS:done` / `STATUS:idle` may proceed to §5; anything else loops back here or stops. Never read the scrollback on an unresolved status: the turn is still in flight and the output is partial.
 
-- Never embed a literal newline in the `agent send` text — TUI composers may submit on newline, splitting one prompt into several partial messages.
-- Every `enter` keystroke, including the retry in §4, goes through the guarded pattern above.
+Keep `$RUNDIR` and `$PROMPT_FILE` until the answer is captured, so the §5 boundary still works.
 
-### 4. Confirm submission
+**On `agent_prompt_stalled`**, read the visible pane (`herdr agent read "$TARGET" --source visible`):
 
-Require the `working` transition — it is what correlates the later `done`/`idle` with *this* request:
+- The prompt is sitting unsubmitted on the composer (`›`) line → recover it (below).
+- The pane shows the prompt already submitted with output below it → the turn completed faster than the state machine observed; go to §5 (the boundary check still applies).
+- Anything else → stop, surface the pane content, report. Do not keep hammering.
+
+Recovering an unsubmitted prompt — re-check that the status is still `idle`/`done`, then send exactly one Enter and **verify it landed** before waiting on it:
 
 ```bash
-SUBMITTED=""
-for _ in 1 2 3 4 5; do
-  sleep 1
-  STATUS=$(herdr agent get "$TARGET" | jq -r '.result.agent.agent_status')
-  if [ "$STATUS" = working ]; then SUBMITTED=1; break; fi
-done
+[ "$(hrun herdr agent send-keys "$TARGET" enter)" = OK ] || { echo "keystroke failed"; exit 1; }
+RESPONSE=$(hq herdr agent wait "$TARGET" --until idle --until done --until blocked --timeout 900000)
 ```
 
-If `working` was never observed:
+Without that check a rejected keystroke is followed by a wait on an agent that was never prompted, which then times out — or worse, settles on unrelated activity — and the failure is reported as the target being slow. Interpret `$RESPONSE` through the §4 table as usual.
 
-- Read the visible pane (`herdr agent read "$TARGET" --source visible`). If the prompt text still sits in the composer (on the `›` line), send one more **guarded** Enter (§3 pattern) and repeat the loop once.
-- If the status is `done`/`idle`, the composer is empty, and the pane shows your prompt as a submitted message with output below it, the answer arrived faster than the poll — treat it as submitted and proceed to §6 (the §6 boundary check still applies).
-- Otherwise stop, surface the pane content, and report — do not keep hammering Enter.
-
-### 5. Wait for completion
-
-Default deadline 5 minutes; use 10–15 minutes when the request is explicitly heavy (multi-file review, deep audit). Poll `agent get` every 2 s so `blocked` is caught too — a bare `agent wait --status idle` would sit through an approval dialog until timeout. Unknown/empty statuses and CLI failures are tolerated only transiently (3 consecutive polls), then fail closed:
+### 5. Read the answer
 
 ```bash
-DEADLINE=$(( $(date +%s) + 300 ))
-RESULT=timeout
-FAILS=0
-while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-  STATUS=$(herdr agent get "$TARGET" 2>/dev/null | jq -r '.result.agent.agent_status' 2>/dev/null)
-  case "$STATUS" in
-    done|idle) RESULT=answered; break ;;
-    blocked)   RESULT=blocked;  break ;;
-    working)   FAILS=0 ;;
-    *)         FAILS=$((FAILS+1)); if [ "$FAILS" -ge 3 ]; then RESULT=error; break; fi ;;
-  esac
-  sleep 2
-done
-echo "RESULT=$RESULT"
+herdr agent read "$TARGET" --source recent-unwrapped --lines 200
 ```
 
-- `answered` → go to §6.
-- `blocked` → read the visible pane and show the dialog to the user; they resolve it in the target pane themselves. Then **resume** (below).
-- `timeout` → show the tail of the pane and report. Offer to resume with a longer deadline.
-- `error` → surface the last raw `herdr agent get` output and stop.
-
-**Resume path (after `blocked` or `timeout`): never re-run §3–§4 — re-sending the prompt would duplicate the request.** Resume means re-running only this §5 wait loop and then §6. Keep `$RUNDIR` and `$PROMPT_FILE` until the answer is captured so the §6 boundary still works.
-
-### 6. Read the answer
-
-```bash
-herdr agent read "$TARGET" --source recent-unwrapped --lines 200 | jq -r '.result.read.text'
-```
-
-Identify the answer with an explicit request boundary — never just "the text at the bottom":
+Plain text — no `jq`. Identify the answer with an explicit request boundary, never just "the text at the bottom":
 
 - **3b sends**: locate the **last occurrence** of the `Please read $PROMPT_FILE …` line. The `$RUNDIR` path is unique per run, so everything after that line is this request's exchange; the target's output within it is the answer.
 - **3a sends**: locate the last occurrence of the exact prompt text. If the same text appears as an earlier request in the scrollback, or you cannot find it, say so and show the tail instead of guessing — and prefer 3b next time.
 
 If the top of the answer is cut off, re-read with a larger `--lines`.
 
-### 7. Report back
+### 6. Report back
 
 Include: the target pane id + agent label, the prompt (or the `$PROMPT_FILE` path when 3b was used), and the answer — verbatim when short, faithfully summarized with key passages quoted when long. Flag explicitly when the run timed out, failed closed, or was interrupted by an approval dialog. Do not claim the target "approved", "agreed", or "completed" anything unless its captured text literally supports it.
 
-### 8. Cleanup
+### 7. Cleanup
 
 After the answer is captured and reported:
 
@@ -179,7 +221,9 @@ After the answer is captured and reported:
 /bin/rm -rf "$RUNDIR"
 ```
 
-On `blocked`/`timeout`, keep `$RUNDIR` for the resume path and tell the user its location. Stale run directories can always be removed with `/bin/rm -rf "${TMPDIR:-/tmp}"/herdr-pane-chat.*` — always the absolute `/bin/rm`, so cleanup is idempotent regardless of how the invoking shell aliases `rm`.
+On `blocked`/`timeout`/`agent_prompt_stalled`, keep `$RUNDIR` for the resume path and tell the user its location. Stale run directories can always be removed with `/bin/rm -rf "${TMPDIR:-/tmp}"/herdr-pane-chat.*` — always the absolute `/bin/rm`, so cleanup is idempotent regardless of how the invoking shell aliases `rm`.
+
+Shell aliases are a live hazard here in general: user shells alias short names to unrelated tools (`tr` → `eza` has been observed). Prefer shell builtins and parameter expansion, or absolute paths, over bare short commands.
 
 ## Command reference
 
@@ -187,9 +231,18 @@ On `blocked`/`timeout`, keep `$RUNDIR` for the resume path and tell the user its
 | --- | --- |
 | List agents (JSON) | `herdr agent list` |
 | One agent's status | `herdr agent get <target> \| jq -r '.result.agent.agent_status'` |
-| Send text (no submit) | `herdr agent send <target> "<text>"` |
-| Submit | `herdr pane send-keys <pane_id> enter` (guarded, §3) |
-| Block until idle/done | `herdr agent wait <target> --status idle --timeout <ms>` |
-| Read scrollback | `herdr agent read <target> --source recent-unwrapped --lines N` |
+| Send + submit + wait | `herdr agent prompt <target> "<text>" --wait --timeout <ms>` |
+| Wait without sending (resume) | `herdr agent wait <target> --until idle --until done --until blocked --timeout <ms>` |
+| Raw keystroke (stall recovery only) | `herdr agent send-keys <target> enter` |
+| Read scrollback (**plain text**) | `herdr agent read <target> --source recent-unwrapped --lines N` |
 
 Targets accept pane ids (`w4:pP`), terminal ids, and unique agent labels — prefer the pane id resolved in §1.
+
+All of these report failure on **stderr** with a non-zero exit, so none of them is ever called bare or piped straight into `jq`:
+
+| Response shape | Checked by |
+| --- | --- |
+| agent object (`get`, `prompt --wait`, `wait`) | `hq` (§2) |
+| acknowledgement (`send-keys`) | `hrun` (§2) |
+| list payload (`list`) | inline exit + `"error"` check (§1) |
+| plain text (`read`) | read directly — not JSON, no `jq` |

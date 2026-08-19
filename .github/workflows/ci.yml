@@ -46,7 +46,10 @@ jobs:
           ok = True
           for skill in pathlib.Path('.').rglob('SKILL.md'):
               src = skill.read_text()
-              for i, b in enumerate(re.findall(r"```bash\n(.*?)\n```", src, flags=re.DOTALL), 1):
+              # Fences indented inside list items count too. Without the [ \t]* the closing
+              # fence is missed and the block runs on into the next one, failing an innocent block.
+              pattern = r"^[ \t]*```bash\n(.*?)\n[ \t]*```"
+              for i, b in enumerate(re.findall(pattern, src, flags=re.DOTALL | re.MULTILINE), 1):
                   with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as f:
                       f.write("#!/usr/bin/env bash\n")
                       f.write(b)
