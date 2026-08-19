@@ -107,15 +107,17 @@ hrun() {                                 # hrun herdr agent send-keys "$TARGET" 
 `agent list` (§1) is the third shape — its payload is a list, not a status — and is checked inline there.
 
 - `STATUS:idle` / `STATUS:done` → proceed to §3.
-- `STATUS:working` → wait, and **check the wait's own result the same way**:
-
-  ```bash
-  READY=$(hq herdr agent wait "$TARGET" --until idle --until done --timeout 60000)
-  ```
-
-  Only `STATUS:idle` / `STATUS:done` may proceed. On `ERROR:timeout:…` show the user the current status plus the tail of `herdr agent read "$TARGET" --source visible --lines 20` and ask whether to keep waiting or abort. On any other `ERROR:` fail closed. Do not interrupt the target.
+- `STATUS:working` → wait out the current turn, checking the wait's own result the same way (below).
 - `STATUS:blocked` → the pane is paused on an approval dialog. Surface the visible pane content and ask the user to resolve it in that pane. Never act on its behalf.
 - **Anything else** (`STATUS:unknown`, empty string, any `ERROR:`) → fail closed: send nothing, surface the raw response, stop.
+
+Waiting out a `working` target:
+
+```bash
+READY=$(hq herdr agent wait "$TARGET" --until idle --until done --timeout 60000)
+```
+
+Only `STATUS:idle` / `STATUS:done` may proceed from here. On `ERROR:timeout:…` show the user the current status plus the tail of `herdr agent read "$TARGET" --source visible --lines 20` and ask whether to keep waiting or abort. On any other `ERROR:` fail closed. Do not interrupt the target.
 
 **Do not skip this step.** `agent prompt --wait` does not correlate its wait with your submission, so prompting an agent that is already `working` can return the instant its *previous* turn ends — and you would then read someone else's answer as if it were yours.
 
@@ -181,16 +183,18 @@ Keep `$RUNDIR` and `$PROMPT_FILE` until the answer is captured, so the §5 bound
 
 **On `agent_prompt_stalled`**, read the visible pane (`herdr agent read "$TARGET" --source visible`):
 
-- The prompt is sitting unsubmitted on the composer (`›`) line → re-check that the status is still `idle`/`done`, then send exactly one Enter and **verify it landed** before waiting on it:
-
-  ```bash
-  [ "$(hrun herdr agent send-keys "$TARGET" enter)" = OK ] || { echo "keystroke failed"; exit 1; }
-  RESPONSE=$(hq herdr agent wait "$TARGET" --until idle --until done --until blocked --timeout 900000)
-  ```
-
-  Without that check a rejected keystroke is followed by a wait on an agent that was never prompted, which then times out — or worse, settles on unrelated activity — and the failure is reported as the target being slow. Interpret `$RESPONSE` through the §4 table as usual.
+- The prompt is sitting unsubmitted on the composer (`›`) line → recover it (below).
 - The pane shows the prompt already submitted with output below it → the turn completed faster than the state machine observed; go to §5 (the boundary check still applies).
 - Anything else → stop, surface the pane content, report. Do not keep hammering.
+
+Recovering an unsubmitted prompt — re-check that the status is still `idle`/`done`, then send exactly one Enter and **verify it landed** before waiting on it:
+
+```bash
+[ "$(hrun herdr agent send-keys "$TARGET" enter)" = OK ] || { echo "keystroke failed"; exit 1; }
+RESPONSE=$(hq herdr agent wait "$TARGET" --until idle --until done --until blocked --timeout 900000)
+```
+
+Without that check a rejected keystroke is followed by a wait on an agent that was never prompted, which then times out — or worse, settles on unrelated activity — and the failure is reported as the target being slow. Interpret `$RESPONSE` through the §4 table as usual.
 
 ### 5. Read the answer
 
