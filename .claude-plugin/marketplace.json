@@ -13,7 +13,7 @@
     {
       "name": "herdr-pane-chat",
       "description": "Chat with an AI agent (Claude Code, Codex, ...) running in another herdr pane — send a prompt, wait via herdr's native agent-status tracking, and capture the answer.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": {
         "name": "Masafumi Ito",
         "email": "ito.masafumi@classmethod.jp"

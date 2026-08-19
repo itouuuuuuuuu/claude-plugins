@@ -1,5 +1,18 @@
 # Changelog — herdr-pane-chat
 
+## [1.1.0] — 2026-08-19
+
+Rewritten against the herdr 0.8.0 CLI. The 1.0.0 instructions were verified against 0.7.4 and no longer work.
+
+- `herdr agent send` + `herdr pane send-keys <pane> enter` replaced by `herdr agent prompt <target> <text> --wait --timeout <ms>`, which writes, submits, and waits for a settled state in one call. The guarded-Enter pattern and the manual poll loop are gone, and with them the composer/Enter race the old flow could only mitigate best-effort.
+- `herdr agent wait --status` renamed to `--until` (repeatable).
+- `herdr agent read` now returns plain text; the old `jq -r '.result.read.text'` extraction produced a parse error.
+- Documented that **every herdr CLI command exits 0 even on failure**, returning `{"error":{...}}` on stdout. Results are now checked for `.error` instead of an exit code — the removed 0.7.x commands print their usage block and still exit 0, so a stale call looks like it succeeded.
+- The pre-send readiness check is now mandatory rather than an optimization: `--wait` does not track turns, so prompting an already-`working` agent can settle on its previous turn and return the wrong answer.
+- Resume after `blocked` / `timeout` / `agent_prompt_stalled` uses `herdr agent wait`; the prompt is still never re-sent.
+- Added a note that user shells alias short command names to unrelated tools (`tr` → `eza` observed in the wild), so builtins, parameter expansion, or absolute paths are preferred.
+- Requires herdr 0.8.0 or newer.
+
 ## [1.0.0] — 2026-07-22
 
 Initial release.
