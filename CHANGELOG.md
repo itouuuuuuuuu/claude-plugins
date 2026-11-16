@@ -2,6 +2,10 @@
 
 This file tracks marketplace-level changes. Each plugin maintains its own changelog under `plugins/<name>/CHANGELOG.md`.
 
+## [0.4.0] — 2026-10-28
+
+- Update [`herdr-pane-chat`](plugins/herdr-pane-chat/CHANGELOG.md) to v1.2.0 — run directories move to `~/.cache/herdr-pane-chat/` so the invoking agent can delete them under a path-based allowlist.
+
 ## [0.3.0] — 2026-08-19
 
 - Update [`herdr-pane-chat`](plugins/herdr-pane-chat/CHANGELOG.md) to v1.1.0 — rewritten against the herdr 0.8.0 CLI (`agent prompt --wait` replaces `agent send` + `pane send-keys`; requires herdr 0.8.0+).

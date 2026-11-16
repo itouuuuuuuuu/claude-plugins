@@ -123,12 +123,16 @@ Only `STATUS:idle` / `STATUS:done` may proceed from here. On `ERROR:timeout:…`
 
 ### 3. Send the prompt
 
-Every run gets a fresh private directory — `mktemp -d` creates it mode 700 and cannot be pre-seeded with a symlink:
+Every run gets a fresh private directory under a **fixed, user-owned base** — `mktemp -d` creates it mode 700 and cannot be pre-seeded with a symlink:
 
 ```bash
-RUNDIR=$(mktemp -d "${TMPDIR:-/tmp}/herdr-pane-chat.XXXXXXXX") || exit 1
+RUNBASE="$HOME/.cache/herdr-pane-chat"
+mkdir -p -m 700 "$RUNBASE" || exit 1
+RUNDIR=$(mktemp -d "$RUNBASE/XXXXXXXX") || exit 1
 PROMPT_FILE="$RUNDIR/prompt.md"
 ```
+
+Do not use `$TMPDIR`. On macOS it resolves to `/var/folders/<…>/T/` (a `/private/var` alias, with a trailing slash that yields `T//herdr-…` paths), so a permission allowlist or an `rm`-guard hook that matches the path as a string cannot pin it down reliably — the run directory then becomes something the invoking agent is not allowed to delete. A path rooted at `$HOME` has one canonical spelling.
 
 Two send paths:
 
@@ -215,13 +219,15 @@ Include: the target pane id + agent label, the prompt (or the `$PROMPT_FILE` pat
 
 ### 7. Cleanup
 
-After the answer is captured and reported:
+After the answer is captured and reported, remove the run directory with the absolute `/bin/rm` and the **literal absolute path** (not `$RUNDIR`, not `~`), as a single command with nothing chained before or after it:
 
 ```bash
-/bin/rm -rf "$RUNDIR"
+/bin/rm -rf /Users/<user>/.cache/herdr-pane-chat/XXXXXXXX
 ```
 
-On `blocked`/`timeout`/`agent_prompt_stalled`, keep `$RUNDIR` for the resume path and tell the user its location. Stale run directories can always be removed with `/bin/rm -rf "${TMPDIR:-/tmp}"/herdr-pane-chat.*` — always the absolute `/bin/rm`, so cleanup is idempotent regardless of how the invoking shell aliases `rm`.
+That exact shape is what a permission allowlist entry such as `Bash(/bin/rm -rf /*/.cache/herdr-pane-chat/*)` or an `rm`-guard hook can whitelist; a variable, a tilde, or a chained command does not match and stops on a confirmation dialog. If the deletion is still refused, report the path and let the user remove it.
+
+On `blocked`/`timeout`/`agent_prompt_stalled`, keep `$RUNDIR` for the resume path and tell the user its location. Stale run directories accumulate under `~/.cache/herdr-pane-chat/` and are removed the same way, one path per command.
 
 Shell aliases are a live hazard here in general: user shells alias short names to unrelated tools (`tr` → `eza` has been observed). Prefer shell builtins and parameter expansion, or absolute paths, over bare short commands.
 

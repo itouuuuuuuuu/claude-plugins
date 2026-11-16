@@ -1,5 +1,10 @@
 # Changelog — herdr-pane-chat
 
+## [1.2.0] — 2026-10-28
+
+- Run directories moved from `$TMPDIR/herdr-pane-chat.XXXXXXXX` to `~/.cache/herdr-pane-chat/XXXXXXXX`. On macOS `$TMPDIR` is a `/private/var/folders/…/T/` alias with a trailing slash, so the resulting `T//herdr-…` paths could not be matched reliably by a permission allowlist or an `rm`-guard hook, and the invoking agent was left unable to delete what it had created. A `$HOME`-rooted path has one canonical spelling.
+- Cleanup now spells out the literal absolute path in a standalone `/bin/rm -rf` command (no `$RUNDIR`, no `~`, no chaining) so the deletion can be whitelisted, and says to hand the path to the user if it is still refused.
+
 ## [1.1.0] — 2026-08-19
 
 Rewritten against the herdr 0.8.0 CLI. The 1.0.0 instructions were verified against 0.7.4 and no longer work.
